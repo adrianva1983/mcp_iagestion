@@ -1,0 +1,25 @@
+services:
+  # Servidor MCP de iagestión (transporte HTTP), siempre arriba.
+  mcp:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+    ports:
+      - "3917:3000" # http://localhost:3917 en el host, por si quieres probarlo sin túnel
+
+  # Túnel público (Cloudflare quick tunnel) hacia el servidor MCP de arriba.
+  # La URL pública sale en sus logs: `docker compose logs tunnel`.
+  # Nota: es una URL aleatoria distinta cada vez que se recrea este contenedor
+  # (no hay dominio propio configurado); si solo quieres uso local sin exponer
+  # el CRM a internet, comenta/borra este servicio y usa http://localhost:3917
+  # directamente (p. ej. desde Claude Desktop apuntando a localhost, o vía CLI).
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://mcp:3000
+    depends_on:
+      mcp:
+        condition: service_healthy
