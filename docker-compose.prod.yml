@@ -1,0 +1,50 @@
+# Despliegue en un VPS con dominio propio: el servidor MCP detrás de Caddy (HTTPS automático).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Requisitos: registro DNS A de MCP_DOMAIN apuntando a la IP del VPS y puertos 80/443 abiertos.
+# Pasos completos en docs/despliegue-vps.md. Para desarrollo local con túnel usa docker-compose.yml.
+
+services:
+  mcp:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      PUBLIC_BASE_URL: "https://${MCP_DOMAIN:?Define MCP_DOMAIN en .env}"
+    volumes:
+      - mcp_data:/data # usuarios (tokens cifrados); alta con: docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre"
+    # Sin `ports`: el contenedor solo es accesible desde Caddy por la red interna de Docker.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MCP_DOMAIN: "${MCP_DOMAIN}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificados: consérvalo para no pedirlos de nuevo en cada arranque
+      - caddy_config:/config
+    depends_on:
+      mcp:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mcp_data:
+  caddy_data:
+  caddy_config:

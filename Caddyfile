@@ -1,0 +1,20 @@
+# Proxy inverso con HTTPS automático (Let's Encrypt). El dominio viene de MCP_DOMAIN (.env).
+# No se activa la directiva `log`: los logs de acceso quedarían con el token de la URL (/mcp/<token>).
+{$MCP_DOMAIN} {
+	# Solo se expone lo necesario; cualquier otra ruta responde 404.
+	@mcp path /mcp /mcp/*
+	handle @mcp {
+		# flush_interval -1: no bufferiza, por si el cliente usa respuestas en streaming (SSE).
+		reverse_proxy mcp:3000 {
+			flush_interval -1
+		}
+	}
+
+	handle /health {
+		reverse_proxy mcp:3000
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

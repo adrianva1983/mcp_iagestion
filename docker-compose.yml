@@ -7,6 +7,8 @@ services:
       - .env
     environment:
       PORT: "3000"
+    volumes:
+      - mcp_data:/data # usuarios (tokens cifrados); alta con: docker compose exec mcp node dist/admin.js add "Nombre"
     ports:
       - "3917:3000" # http://localhost:3917 en el host, por si quieres probarlo sin túnel
 
@@ -23,3 +25,6 @@ services:
     depends_on:
       mcp:
         condition: service_healthy
+
+volumes:
+  mcp_data:

@@ -12,7 +12,8 @@
  *  - Base URL: https://pasarelas.iagestion.com/api-gestioninmo/v3/{servicio}/
  *  - Método: POST siempre.
  *  - Content-Type: application/x-www-form-urlencoded.
- *  - Auth: Authorization: Bearer <IAGESTION_API_TOKEN>.
+ *  - Auth: Authorization: Bearer <token M2M>. En stdio sale de IAGESTION_API_TOKEN;
+ *    en el transporte HTTP multiusuario, del usuario de la petición (requestContext.ts).
  *  - Peculiaridad: la API puede responder HTTP 200 con un error de negocio en el
  *    cuerpo ({"validacion":"error", "mensaje": "..."} o {"error": true, ...}).
  *    Este cliente detecta ese caso y lanza IagestionApiError para que las
@@ -20,9 +21,11 @@
  */
 
 import axios, { AxiosInstance, isAxiosError } from "axios";
+import { currentUser } from "./requestContext.js";
 
+// IAGESTION_BASE_URL solo se sobreescribe para pruebas contra una API simulada.
 export const IAGESTION_BASE_URL =
-  "https://pasarelas.iagestion.com/api-gestioninmo/v3";
+  process.env.IAGESTION_BASE_URL ?? "https://pasarelas.iagestion.com/api-gestioninmo/v3";
 
 /** Error de dominio: agrupa tanto fallos HTTP como errores de negocio devueltos con HTTP 200. */
 export class IagestionApiError extends Error {
@@ -56,11 +59,17 @@ export type RequestParams = Record<
 >;
 
 function getToken(): string {
-  const token = process.env.IAGESTION_API_TOKEN;
+  // Con contexto de usuario (transporte HTTP) se usa SIEMPRE el token de ese
+  // usuario, sin caer nunca al de otro. Sin contexto (stdio) vale la variable
+  // de entorno IAGESTION_API_TOKEN.
+  const user = currentUser();
+  const token = user ? user.apiToken : process.env.IAGESTION_API_TOKEN;
   if (!token || token.trim() === "") {
     throw new IagestionApiError(
-      "Falta la variable de entorno IAGESTION_API_TOKEN con el token M2M (Bearer) de iagestión. " +
-        "Configúrala en el entorno del proceso o en la configuración del cliente MCP antes de usar esta herramienta."
+      user
+        ? "Tu usuario no tiene un token de iagestión configurado. Pide al administrador que lo asigne (admin set-token)."
+        : "Falta la variable de entorno IAGESTION_API_TOKEN con el token M2M (Bearer) de iagestión. " +
+            "Configúrala en el entorno del proceso o en la configuración del cliente MCP antes de usar esta herramienta."
     );
   }
   return token;

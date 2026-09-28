@@ -6,3 +6,4 @@ dist
 .env
 .env.*
 README.md
+data

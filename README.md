@@ -90,9 +90,13 @@ Tras guardar el archivo, reinicia Claude Desktop. Las 10 tools
 
 `src/httpServer.ts` (no aplica al stdio local de Claude Desktop/Code, que ya corre bajo control
 directo del usuario) implementa dos capas adicionales, pensadas para cuando el servidor está
-expuesto a internet (túnel, PaaS...):
+expuesto a internet (túnel, PaaS...).
 
-- **Rate limiting**: máx. 30 peticiones/minuto por `MCP_ACCESS_TOKEN`. Al superarlo, responde
+**Multiusuario**: cada usuario tiene su propio token de acceso y su propio token M2M de iagestión
+(cifrado en reposo), y las altas/bajas se hacen con `node dist/admin.js` sin reiniciar. Guía
+completa en [docs/multiusuario.md](docs/multiusuario.md). Además:
+
+- **Rate limiting**: máx. 30 peticiones/minuto por usuario. Al superarlo, responde
   `HTTP 429` con cabecera `Retry-After` y un mensaje indicando cuándo se restablece.
 - **Freno a acciones destructivas**: las llamadas a tools de `actualizar_*`, `eliminar_*`,
   `desvincular_propietario`, `publicar_despublicar_inmueble` y `gestionar_lead` se cuentan en una
@@ -105,12 +109,15 @@ expuesto a internet (túnel, PaaS...):
   cualquiera de las tools — no requiere tocar sus esquemas Zod individuales.
 
 Ambos contadores viven en memoria del proceso (no persisten entre reinicios del contenedor `mcp`)
-y son independientes por token de acceso.
+y son independientes por usuario.
 
 > **Pendiente**: `IAGESTION_CONFIRM_TOKEN` es un secreto estático provisional. El diseño para
 > sustituirlo por un token dinámico (guardado en base de datos, con caducidad, enviado al
 > responsable por WhatsApp o email) está documentado en
 > [docs/confirmacion-humana-dinamica.md](docs/confirmacion-humana-dinamica.md), pendiente de implementar.
+
+> **Producción en un VPS con dominio propio**: usa `docker-compose.prod.yml` (Caddy con HTTPS
+> automático en lugar del túnel). Guía en [docs/despliegue-vps.md](docs/despliegue-vps.md).
 
 ## Docker (recomendado para tenerlo siempre arriba)
 
@@ -121,9 +128,11 @@ Docker Desktop o el PC.
 ```powershell
 cd D:\000Apps\MCP_iagestion
 copy .env.example .env
-notepad .env   # rellena IAGESTION_API_TOKEN, MCP_ACCESS_TOKEN e IAGESTION_CONFIRM_TOKEN
+notepad .env   # multiusuario: USERS_ENCRYPTION_KEY, PUBLIC_BASE_URL e IAGESTION_CONFIRM_TOKEN
+               # un solo usuario: IAGESTION_API_TOKEN y MCP_ACCESS_TOKEN
 
 docker compose up -d --build
+docker compose exec mcp node dist/admin.js add "Nombre"   # alta de un usuario (multiusuario)
 ```
 
 Esto levanta dos contenedores:
@@ -138,7 +147,7 @@ docker compose logs tunnel
 # busca la línea con https://algo-aleatorio.trycloudflare.com
 ```
 
-Esa es la URL a pegar en el conector de claude.ai (`.../mcp/<MCP_ACCESS_TOKEN>`), igual que en el uso
+Esa es la URL a pegar en el conector de claude.ai (`.../mcp/<token_de_acceso_del_usuario>`), igual que en el uso
 manual. Sigue siendo aleatoria en cada `docker compose up` (túnel rápido, sin dominio propio) — si
 recreas el contenedor `tunnel`, cambia y hay que actualizar el conector.
 

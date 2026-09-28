@@ -7,21 +7,28 @@
  * vía URL, etc.). Pensado para correr detrás de un túnel (Cloudflare Tunnel,
  * ngrok...) o desplegado en un PaaS con HTTPS.
  *
+ * Multiusuario: cada usuario tiene su propio token de acceso y su propio token
+ * M2M de iagestión (cifrado en reposo, ver src/users.ts). El token de acceso
+ * identifica al usuario y, con él, qué token de iagestión se usa en sus
+ * llamadas (viaja en un AsyncLocalStorage, ver src/requestContext.ts). Las altas
+ * y bajas se hacen con el CLI src/admin.ts, sin reiniciar el servidor.
+ *
  * Seguridad:
- *  - IAGESTION_API_TOKEN: token M2M hacia la API de iagestión (se queda
- *    en el servidor, nunca lo ve el cliente MCP).
- *  - MCP_ACCESS_TOKEN: secreto propio de este servidor. Se exige en la URL
- *    (/mcp/<token>) porque muchos clientes de conector remoto solo permiten
- *    pegar una URL, sin poder añadir cabeceras personalizadas. También se
- *    acepta como `Authorization: Bearer <token>` para clientes que sí
- *    soportan cabeceras (p. ej. Gemini CLI). Sin MCP_ACCESS_TOKEN configurado,
- *    el servidor rehúsa arrancar: exponer este servicio sin secreto propio
+ *  - Token M2M de iagestión: se queda en el servidor, nunca lo ve el cliente MCP.
+ *  - Token de acceso por usuario: se exige en la URL (/mcp/<token>) porque
+ *    muchos clientes de conector remoto solo permiten pegar una URL, sin poder
+ *    añadir cabeceras personalizadas. También se acepta como
+ *    `Authorization: Bearer <token>` en /mcp (sin token en la ruta), que evita
+ *    dejar el secreto en los logs de acceso del proxy. Sin ningún usuario ni
+ *    MCP_ACCESS_TOKEN, nadie entra: exponer este servicio sin secreto propio
  *    dejaría el CRM completo (lectura y escritura) abierto a quien tenga la URL.
- *  - Rate limiting: máx. RATE_LIMIT_MAX peticiones/minuto por token de acceso
+ *  - MCP_ACCESS_TOKEN (opcional, modo heredado de un solo usuario): si está
+ *    definido sigue funcionando y usa IAGESTION_API_TOKEN del entorno.
+ *  - Rate limiting: máx. RATE_LIMIT_MAX peticiones/minuto por usuario
  *    (ver checkRateLimit). Devuelve HTTP 429 con Retry-After.
  *  - Freno a acciones destructivas: más de DESTRUCTIVE_THRESHOLD llamadas a
  *    tools de actualizar/eliminar/desvincular/publicar-despublicar/gestionar
- *    lead en DESTRUCTIVE_WINDOW_MS exigen `confirmacion_humana` en los
+ *    lead en DESTRUCTIVE_WINDOW_MS (por usuario) exigen `confirmacion_humana` en los
  *    argumentos de la tool, igual al secreto IAGESTION_CONFIRM_TOKEN — así
  *    una cadena de modificaciones/borrados no puede ejecutarse sin que un
  *    humano (no el LLM) facilite ese token de aprobación. Interceptado a
@@ -45,6 +52,8 @@ import { randomUUID, timingSafeEqual as nodeTimingSafeEqual } from "node:crypto"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createIagestionServer } from "./mcpServer.js";
+import { runWithUser, type UserContext } from "./requestContext.js";
+import { countUsers, decryptApiToken, findUserByAccessToken, USERS_FILE } from "./users.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ACCESS_TOKEN = process.env.MCP_ACCESS_TOKEN;
@@ -84,19 +93,47 @@ function timingSafeEqual(a: string, b: string): boolean {
   return nodeTimingSafeEqual(bufA, bufB);
 }
 
-function isAuthorized(req: { params: Record<string, string>; headers: Record<string, unknown> }): boolean {
-  if (!ACCESS_TOKEN) return false;
+type AuthResult =
+  | { ok: true; user: UserContext }
+  | { ok: false; status: 401 | 500; code: number; message: string };
 
-  const fromUrl = req.params.token;
-  if (fromUrl && timingSafeEqual(fromUrl, ACCESS_TOKEN)) return true;
-
+/**
+ * Identifica al usuario por el token de la URL o por `Authorization: Bearer`.
+ * Los tokens de usuario se buscan por su hash SHA-256 (el token en claro no se
+ * guarda), así que la búsqueda no depende de comparar cadenas con el secreto.
+ */
+function authenticate(req: { params: Record<string, string | undefined>; headers: Record<string, unknown> }): AuthResult {
+  const candidates: string[] = [];
+  if (req.params.token) candidates.push(req.params.token);
   const authHeader = req.headers.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-    const fromHeader = authHeader.slice("Bearer ".length);
-    if (timingSafeEqual(fromHeader, ACCESS_TOKEN)) return true;
+    candidates.push(authHeader.slice("Bearer ".length));
   }
 
-  return false;
+  for (const candidate of candidates) {
+    const record = findUserByAccessToken(candidate);
+    if (record) {
+      try {
+        return {
+          ok: true,
+          user: { userId: record.id, nombre: record.nombre, apiToken: decryptApiToken(record.apiTokenEnc) },
+        };
+      } catch (error) {
+        // Clave de cifrado incorrecta o fichero alterado. Nunca se cae al token de otro usuario.
+        console.error(`[iagestion-mcp-http] No se pudo descifrar el token de iagestión del usuario ${record.id}:`, error);
+        return { ok: false, status: 500, code: -32603, message: "Error interno del servidor." };
+      }
+    }
+
+    if (ACCESS_TOKEN && timingSafeEqual(candidate, ACCESS_TOKEN)) {
+      return {
+        ok: true,
+        user: { userId: "legacy", nombre: "(token único)", apiToken: process.env.IAGESTION_API_TOKEN },
+      };
+    }
+  }
+
+  return { ok: false, status: 401, code: -32001, message: "No autorizado: token de acceso inválido o ausente." };
 }
 
 function jsonRpcError(id: unknown, code: number, message: string) {
@@ -104,16 +141,16 @@ function jsonRpcError(id: unknown, code: number, message: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiting: ventana fija de RATE_LIMIT_WINDOW_MS por token de acceso.
+// Rate limiting: ventana fija de RATE_LIMIT_WINDOW_MS por usuario.
 // ---------------------------------------------------------------------------
 
 const rateLimitState = new Map<string, { count: number; windowStart: number }>();
 
-function checkRateLimit(token: string): { allowed: boolean; retryAfterSeconds: number } {
+function checkRateLimit(userId: string): { allowed: boolean; retryAfterSeconds: number } {
   const now = Date.now();
-  const state = rateLimitState.get(token);
+  const state = rateLimitState.get(userId);
   if (!state || now - state.windowStart >= RATE_LIMIT_WINDOW_MS) {
-    rateLimitState.set(token, { count: 1, windowStart: now });
+    rateLimitState.set(userId, { count: 1, windowStart: now });
     return { allowed: true, retryAfterSeconds: 0 };
   }
   if (state.count >= RATE_LIMIT_MAX) {
@@ -126,22 +163,29 @@ function checkRateLimit(token: string): { allowed: boolean; retryAfterSeconds: n
 
 // ---------------------------------------------------------------------------
 // Freno a acciones destructivas: ventana fija de DESTRUCTIVE_WINDOW_MS por
-// token de acceso. Al superar el umbral, cada llamada destructiva adicional
+// usuario. Al superar el umbral, cada llamada destructiva adicional
 // exige confirmacion_humana === IAGESTION_CONFIRM_TOKEN en sus argumentos.
 // ---------------------------------------------------------------------------
 
 const destructiveState = new Map<string, { count: number; windowStart: number }>();
 
-function registerDestructiveCall(token: string): { count: number } {
+function registerDestructiveCall(userId: string): { count: number } {
   const now = Date.now();
-  const state = destructiveState.get(token);
+  const state = destructiveState.get(userId);
   if (!state || now - state.windowStart >= DESTRUCTIVE_WINDOW_MS) {
     const fresh = { count: 1, windowStart: now };
-    destructiveState.set(token, fresh);
+    destructiveState.set(userId, fresh);
     return { count: fresh.count };
   }
   state.count += 1;
   return { count: state.count };
+}
+
+/** Con muchos usuarios los Map crecerían sin límite: se purgan las ventanas ya caducadas. */
+function pruneExpiredWindows(): void {
+  const now = Date.now();
+  for (const [key, s] of rateLimitState) if (now - s.windowStart >= RATE_LIMIT_WINDOW_MS) rateLimitState.delete(key);
+  for (const [key, s] of destructiveState) if (now - s.windowStart >= DESTRUCTIVE_WINDOW_MS) destructiveState.delete(key);
 }
 
 interface JsonRpcCallBody {
@@ -163,7 +207,7 @@ interface JsonRpcCallBody {
  */
 function guardDestructiveCall(
   body: unknown,
-  accessToken: string
+  userId: string
 ): { blocked: false } | { blocked: true; error: ReturnType<typeof jsonRpcError> } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { blocked: false };
   const call = body as JsonRpcCallBody;
@@ -178,7 +222,7 @@ function guardDestructiveCall(
   // campo en su esquema Zod (additionalProperties:false lo rechazaría).
   if (args && "confirmacion_humana" in args) delete args.confirmacion_humana;
 
-  const { count } = registerDestructiveCall(accessToken);
+  const { count } = registerDestructiveCall(userId);
 
   if (count <= DESTRUCTIVE_THRESHOLD) {
     return { blocked: false };
@@ -205,19 +249,27 @@ function guardDestructiveCall(
 }
 
 async function main(): Promise<void> {
-  if (!ACCESS_TOKEN) {
+  if (!ACCESS_TOKEN && !process.env.USERS_ENCRYPTION_KEY) {
     console.error(
-      "[iagestion-mcp-http] Falta MCP_ACCESS_TOKEN. Genera un secreto propio " +
-        "(p. ej. `node -e \"console.log(require('crypto').randomUUID())\"`) y expórtalo " +
-        "antes de arrancar; el servidor no arranca sin él para no exponer el CRM sin protección."
+      "[iagestion-mcp-http] Falta configuración de acceso. Define USERS_ENCRYPTION_KEY (modo multiusuario, " +
+        "recomendado; los usuarios se dan de alta con `node dist/admin.js add`) o MCP_ACCESS_TOKEN (modo de " +
+        "un solo usuario). El servidor no arranca sin ninguno para no exponer el CRM sin protección."
     );
     process.exit(1);
   }
 
-  if (!process.env.IAGESTION_API_TOKEN) {
+  if (process.env.USERS_ENCRYPTION_KEY) {
+    const users = countUsers();
+    console.error(`[iagestion-mcp-http] Modo multiusuario: ${users} usuario(s) en ${USERS_FILE}.`);
+    if (users === 0 && !ACCESS_TOKEN) {
+      console.error("[iagestion-mcp-http] Aviso: aún no hay usuarios; nadie podrá conectar hasta el primer `admin add`.");
+    }
+  }
+
+  if (ACCESS_TOKEN && !process.env.IAGESTION_API_TOKEN) {
     console.error(
       "[iagestion-mcp-http] Aviso: IAGESTION_API_TOKEN no está definida. " +
-        "Las llamadas a la API de iagestión fallarán hasta que se configure."
+        "Las llamadas con MCP_ACCESS_TOKEN (modo de un solo usuario) fallarán hasta que se configure."
     );
   }
 
@@ -231,16 +283,21 @@ async function main(): Promise<void> {
 
   // host: '0.0.0.0' porque detrás de un túnel el Host header entrante es el
   // hostname público del túnel (cambia cada vez), no localhost. La protección
-  // real la da el MCP_ACCESS_TOKEN exigido en isAuthorized(), no el Host header.
+  // real la da el token de acceso exigido en authenticate(), no el Host header.
   const app = createMcpExpressApp({ host: "0.0.0.0" });
 
-  app.post("/mcp/:token", async (req, res) => {
-    if (!isAuthorized(req)) {
-      res.status(401).json(jsonRpcError(req.body?.id, -32001, "No autorizado: token de acceso inválido o ausente."));
+  setInterval(pruneExpiredWindows, 5 * 60_000).unref();
+
+  // Dos formas de llegar: /mcp/<token> (token en la URL) y /mcp (token en Authorization: Bearer).
+  app.post(["/mcp", "/mcp/:token"], async (req, res) => {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.status(auth.status).json(jsonRpcError(req.body?.id, auth.code, auth.message));
       return;
     }
+    const { user } = auth;
 
-    const rate = checkRateLimit(req.params.token);
+    const rate = checkRateLimit(user.userId);
     if (!rate.allowed) {
       res.setHeader("Retry-After", String(rate.retryAfterSeconds));
       res
@@ -255,10 +312,15 @@ async function main(): Promise<void> {
       return;
     }
 
-    const guard = guardDestructiveCall(req.body, req.params.token);
+    const guard = guardDestructiveCall(req.body, user.userId);
     if (guard.blocked) {
       res.status(403).json(guard.error);
       return;
+    }
+
+    // Rastro de auditoría: quién llama a qué tool (nunca se registra ningún token).
+    if (req.body?.method === "tools/call") {
+      console.error(`[iagestion-mcp-http] usuario=${user.nombre} (${user.userId}) tool=${req.body?.params?.name}`);
     }
 
     const server = createIagestionServer();
@@ -266,8 +328,12 @@ async function main(): Promise<void> {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      // El contexto de usuario debe abrirse antes de conectar y de gestionar la
+      // petición: es lo que hace que las tools usen el token de iagestión de ESTE usuario.
+      await runWithUser(user, async () => {
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      });
       res.on("close", () => {
         transport.close();
         server.close();
@@ -281,10 +347,10 @@ async function main(): Promise<void> {
   });
 
   // Modo stateless: no hay stream SSE persistente (GET) ni sesiones que cerrar (DELETE).
-  app.get("/mcp/:token", (_req, res) => {
+  app.get(["/mcp", "/mcp/:token"], (_req, res) => {
     res.status(405).json(jsonRpcError(null, -32000, "Method not allowed (servidor en modo stateless)."));
   });
-  app.delete("/mcp/:token", (_req, res) => {
+  app.delete(["/mcp", "/mcp/:token"], (_req, res) => {
     res.status(405).json(jsonRpcError(null, -32000, "Method not allowed (servidor en modo stateless)."));
   });
 
@@ -294,7 +360,7 @@ async function main(): Promise<void> {
 
   app.listen(PORT, () => {
     console.error(`[iagestion-mcp-http] Escuchando en http://localhost:${PORT}`);
-    console.error(`[iagestion-mcp-http] Endpoint MCP: POST http://localhost:${PORT}/mcp/<MCP_ACCESS_TOKEN>`);
+    console.error(`[iagestion-mcp-http] Endpoint MCP: POST http://localhost:${PORT}/mcp/<token_de_acceso> (o /mcp con Authorization: Bearer)`);
     console.error(
       `[iagestion-mcp-http] Rate limit: ${RATE_LIMIT_MAX}/min · Freno destructivo: ${DESTRUCTIVE_THRESHOLD} acciones / ${DESTRUCTIVE_WINDOW_MS / 60_000} min`
     );

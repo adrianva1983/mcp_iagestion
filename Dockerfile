@@ -23,6 +23,13 @@ COPY --from=builder /app/dist ./dist
 
 # Usuario sin privilegios: el proceso Node no corre como root dentro del contenedor.
 RUN addgroup -S mcp && adduser -S mcp -G mcp
+
+# Fichero de usuarios (multiusuario): en un volumen para que sobreviva a los
+# redespliegues. Se crea aquí con dueño mcp para que el volumen nombrado lo herede.
+RUN mkdir /data && chown mcp:mcp /data
+VOLUME /data
+ENV USERS_FILE=/data/users.json
+
 USER mcp
 
 ENV PORT=3000
