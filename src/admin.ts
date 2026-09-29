@@ -2,22 +2,26 @@
 /**
  * CLI de administración de usuarios del servidor HTTP multiusuario.
  *
- *   node dist/admin.js add "Ana Pérez" --confirm-code 1234   alta (pide el token de iagestión sin eco)
- *   node dist/admin.js list                                  lista usuarios
- *   node dist/admin.js rotate <id|nombre>                    genera un token de acceso nuevo (invalida el anterior)
- *   node dist/admin.js set-token <id|nombre>                 cambia el token de iagestión del usuario
- *   node dist/admin.js set-confirm-code <id|nombre> <código> cambia el código de confirmación humana
- *   node dist/admin.js revoke <id|nombre>                    baja: el usuario deja de poder conectar
+ *   node dist/admin.js add "Ana Pérez" --confirm-code           alta, código de confirmación autogenerado
+ *   node dist/admin.js add "Ana Pérez" --confirm-code 4821      alta, código propio elegido a mano
+ *   node dist/admin.js list                                     lista usuarios
+ *   node dist/admin.js rotate <id|nombre>                       genera un token de acceso nuevo (invalida el anterior)
+ *   node dist/admin.js set-token <id|nombre>                    cambia el token de iagestión del usuario
+ *   node dist/admin.js set-confirm-code <id|nombre>              autogenera el código de confirmación
+ *   node dist/admin.js set-confirm-code <id|nombre> <código>     fija el código de confirmación a mano
+ *   node dist/admin.js clear-confirm-code <id|nombre>            quita el código propio (usa el compartido)
+ *   node dist/admin.js revoke <id|nombre>                        baja: el usuario deja de poder conectar
  *
- * En Docker: docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code 1234
+ * En Docker: docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code
  * El token de iagestión también puede llegar por stdin (echo "<token>" | ... add Ana)
  * o por la variable IAGESTION_USER_TOKEN, para automatizar altas sin dejarlo en el historial.
  *
- * --confirm-code es opcional: es el código que ese usuario debe incluir en
+ * El código de confirmación es opcional: es lo que ese usuario debe incluir en
  * "confirmacion_humana" al superar el umbral de acciones destructivas
  * (actualizar/eliminar en cadena). Sin él, usa el secreto compartido
- * IAGESTION_CONFIRM_TOKEN del servidor. Tú eliges el valor — no lo genera ni
- * lo envía el sistema por ningún canal; se lo dices tú a esa persona.
+ * IAGESTION_CONFIRM_TOKEN del servidor. Se muestra en claro UNA sola vez al
+ * crearlo o cambiarlo (autogenerado o no); luego solo se guarda su hash — no
+ * se puede recuperar, solo volver a cambiar.
  */
 
 import { randomBytes } from "node:crypto";
@@ -27,6 +31,7 @@ import {
   defaultExpiryIso,
   encryptApiToken,
   generateAccessToken,
+  generateConfirmCode,
   hashAccessToken,
   hashConfirmCode,
   readStore,
@@ -84,13 +89,18 @@ function extractDiasFlag(args: string[]): { rest: string[]; dias?: number } {
   return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], dias };
 }
 
-/** Saca "--confirm-code X" de la lista de argumentos (usado por add para el código de confirmación humana). */
-function extractConfirmCodeFlag(args: string[]): { rest: string[]; code?: string } {
+/**
+ * Saca "--confirm-code" (con o sin valor) de la lista de argumentos, usado por add.
+ * Sin valor detrás (o seguido de otro flag) => autogenerar; con valor => usar ese.
+ */
+function extractConfirmCodeFlag(args: string[]): { rest: string[]; mode: "none" | "auto" | "manual"; code?: string } {
   const idx = args.findIndex((a) => a === "--confirm-code");
-  if (idx === -1) return { rest: args };
-  const code = args[idx + 1];
-  if (!code) fail('"--confirm-code" debe ir seguido de un código.');
-  return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], code };
+  if (idx === -1) return { rest: args, mode: "none" };
+  const next = args[idx + 1];
+  if (next === undefined || next.startsWith("--")) {
+    return { rest: [...args.slice(0, idx), ...args.slice(idx + 1)], mode: "auto" };
+  }
+  return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], mode: "manual", code: next };
 }
 
 function findUser(users: UserRecord[], ref: string | undefined): UserRecord {
@@ -101,7 +111,7 @@ function findUser(users: UserRecord[], ref: string | undefined): UserRecord {
   return matches[0]!;
 }
 
-function printAccess(user: UserRecord, token: string): void {
+function printAccess(user: UserRecord, token: string, freshConfirmCode?: string): void {
   const base = (process.env.PUBLIC_BASE_URL ?? "https://TU_DOMINIO").replace(/\/+$/, "");
   console.log(`\nUsuario: ${user.nombre} (id ${user.id})`);
   console.log("Token de acceso (se muestra UNA sola vez, no se puede recuperar):");
@@ -112,6 +122,10 @@ function printAccess(user: UserRecord, token: string): void {
       ? "Confirmación humana: código propio configurado."
       : "Confirmación humana: usa el código compartido del servidor (IAGESTION_CONFIRM_TOKEN)."
   );
+  if (freshConfirmCode) {
+    console.log("  Código (se muestra UNA sola vez, no se puede recuperar):");
+    console.log(`    ${freshConfirmCode}`);
+  }
   console.log("URL para el conector remoto (clientes que solo admiten pegar una URL):");
   console.log(`  ${base}/mcp/${token}`);
   console.log("O, si el cliente admite cabeceras (evita dejar el token en los logs): URL + Authorization: Bearer <token>:");
@@ -125,14 +139,16 @@ async function main(): Promise<void> {
   switch (command) {
     case "add": {
       const { rest: restDias, dias } = extractDiasFlag(args);
-      const { rest, code } = extractConfirmCodeFlag(restDias);
+      const { rest, mode, code: explicitCode } = extractConfirmCodeFlag(restDias);
       const nombre = rest.join(" ").trim();
-      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N] [--confirm-code X]');
+      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N] [--confirm-code [X]]');
       if (store.users.some((u) => u.nombre.toLowerCase() === nombre.toLowerCase())) {
         fail(`Ya existe un usuario llamado "${nombre}".`);
       }
       const apiToken = await readSecret("Token M2M de iagestión de este usuario: ");
       if (!apiToken) fail("El token de iagestión no puede estar vacío.");
+
+      const confirmCode = mode === "auto" ? generateConfirmCode() : mode === "manual" ? explicitCode : undefined;
 
       const accessToken = generateAccessToken();
       const user: UserRecord = {
@@ -143,19 +159,19 @@ async function main(): Promise<void> {
         createdAt: new Date().toISOString(),
         expiresAt: defaultExpiryIso(dias),
         lastUsedAt: null,
-        confirmCodeHash: code ? hashConfirmCode(code) : undefined,
+        confirmCodeHash: confirmCode ? hashConfirmCode(confirmCode) : undefined,
       };
       store.users.push(user);
       writeStore(store);
       console.log(`Usuario dado de alta en ${USERS_FILE}.`);
-      if (!code) {
+      if (!confirmCode) {
         console.log(
-          'Aviso: sin "--confirm-code", este usuario usará el código compartido del servidor ' +
+          'Aviso: sin código de confirmación, este usuario usará el código compartido del servidor ' +
             '(IAGESTION_CONFIRM_TOKEN) para confirmar acciones destructivas en cadena. ' +
             'Añádele uno propio luego con "admin set-confirm-code".'
         );
       }
-      printAccess(user, accessToken);
+      printAccess(user, accessToken, confirmCode);
       break;
     }
 
@@ -208,15 +224,28 @@ async function main(): Promise<void> {
     }
 
     case "set-confirm-code": {
-      const code = args[args.length - 1];
-      const nombre = args.slice(0, -1).join(" ").trim();
-      if (!nombre || !code) {
-        fail('Uso: set-confirm-code "Nombre del usuario" <código>');
-      }
+      // args[0] = nombre (se espera entrecomillado como UN argumento, igual que en el resto de comandos).
+      // args[1], si viene, es el código a mano; sin él, se autogenera.
+      const nombre = args[0]?.trim();
+      const explicitCode = args[1];
+      if (!nombre) fail('Uso: set-confirm-code "Nombre del usuario" [código]  (sin código, se autogenera uno)');
       const user = findUser(store.users, nombre);
+      const code = explicitCode || generateConfirmCode();
       user.confirmCodeHash = hashConfirmCode(code);
       writeStore(store);
       console.log(`Código de confirmación humana actualizado para ${user.nombre}.`);
+      if (!explicitCode) {
+        console.log("Código autogenerado (se muestra UNA sola vez, no se puede recuperar):");
+        console.log(`  ${code}`);
+      }
+      break;
+    }
+
+    case "clear-confirm-code": {
+      const user = findUser(store.users, args.join(" ").trim());
+      user.confirmCodeHash = undefined;
+      writeStore(store);
+      console.log(`Código de confirmación propio eliminado para ${user.nombre}; volverá a usar el código compartido.`);
       break;
     }
 
@@ -230,8 +259,8 @@ async function main(): Promise<void> {
 
     default:
       console.error(
-        'Uso: admin <add "Nombre" [--dias N] [--confirm-code X] | list | rotate <usuario> [--dias N] | ' +
-          'set-token <usuario> | set-confirm-code <usuario> <código> | revoke <usuario>>'
+        'Uso: admin <add "Nombre" [--dias N] [--confirm-code [X]] | list | rotate <usuario> [--dias N] | ' +
+          'set-token <usuario> | set-confirm-code <usuario> [código] | clear-confirm-code <usuario> | revoke <usuario>>'
       );
       process.exit(command ? 1 : 0);
   }

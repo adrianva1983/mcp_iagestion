@@ -14,7 +14,7 @@
  * a reiniciar.
  */
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -112,6 +112,17 @@ export function hashAccessToken(token: string): string {
 /** Igual que hashAccessToken, con nombre propio para que su uso en el freno de acciones destructivas sea claro. */
 export function hashConfirmCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");
+}
+
+// Sin 0/O, 1/I/L, U (se confunden al leerlos o dictarlos). 30 símbolos, 8 caracteres:
+// 30⁸ ≈ 6.6 × 10¹¹ combinaciones — de sobra para un secreto persistente (no caduca solo).
+const CONFIRM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+
+/** Genera un código de confirmación al azar, para quien prefiera no inventarse uno (admin set-confirm-code sin argumento). */
+export function generateConfirmCode(length = 8): string {
+  let code = "";
+  for (let i = 0; i < length; i++) code += CONFIRM_CODE_ALPHABET[randomInt(CONFIRM_CODE_ALPHABET.length)];
+  return code;
 }
 
 // ---------------------------------------------------------------------------

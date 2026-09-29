@@ -28,12 +28,15 @@ Deja `MCP_ACCESS_TOKEN` e `IAGESTION_API_TOKEN` vacíos.
 # Alta: pide el token de iagestión sin eco y muestra el token de acceso y la URL (solo esta vez)
 docker compose exec mcp node dist/admin.js add "Ana Pérez"
 docker compose exec mcp node dist/admin.js add "Ana Pérez" --dias 30   # caducidad distinta de la por defecto (TOKEN_TTL_DAYS)
-docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code 4821   # código de confirmación propio (ver más abajo)
+docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code          # código de confirmación autogenerado
+docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code 4821     # o uno propio, a mano
 
 docker compose exec mcp node dist/admin.js list
 docker compose exec mcp node dist/admin.js rotate "Ana Pérez"      # token de acceso nuevo + renueva la caducidad; el anterior deja de valer
 docker compose exec mcp node dist/admin.js set-token "Ana Pérez"   # si cambia su token de iagestión
-docker compose exec mcp node dist/admin.js set-confirm-code "Ana Pérez" 4821   # da de alta o cambia su código de confirmación
+docker compose exec mcp node dist/admin.js set-confirm-code "Ana Pérez"        # autogenera un código de confirmación nuevo
+docker compose exec mcp node dist/admin.js set-confirm-code "Ana Pérez" 4821   # o lo fija a mano
+docker compose exec mcp node dist/admin.js clear-confirm-code "Ana Pérez"      # quita el código propio (vuelve al compartido)
 docker compose exec mcp node dist/admin.js revoke "Ana Pérez"      # baja inmediata
 ```
 

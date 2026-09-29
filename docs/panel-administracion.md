@@ -35,13 +35,15 @@ Al cerrar la sesión SSH se cierra también el acceso al panel.
 ## Qué se puede hacer
 
 - **Nuevo usuario**: nombre, su token M2M de iagestión, código de confirmación humana propio
-  (opcional, ver abajo) y, opcionalmente, días de validez distintos del habitual (`TOKEN_TTL_DAYS`).
-  Al crearlo se muestra el token de acceso y la URL del conector **una sola vez** — cópialos ahí
-  mismo, como con `admin add`.
+  (opcional, con un botón "Generar" si no quieres inventártelo) y, opcionalmente, días de validez
+  distintos del habitual (`TOKEN_TTL_DAYS`). Al crearlo se muestra el token de acceso, la URL del
+  conector y el código de confirmación (si le pusiste uno) **una sola vez** — cópialos ahí mismo,
+  como con `admin add`.
 - **Tabla de usuarios**: fecha de alta, caducidad (con aviso si quedan 14 días o menos, o
   "caducado"), último uso, si tiene código de confirmación propio o usa el compartido, y botones
   para **rotar** el token de acceso, **cambiar** el token de iagestión, **cambiar** el código de
-  confirmación o **revocar** al usuario.
+  confirmación (a mano), **generar código** (uno nuevo al azar, mostrado una vez) o **revocar** al
+  usuario.
 - **Actividad reciente**: las últimas llamadas a tools, con fecha, usuario y nombre de la tool
   (nunca argumentos ni tokens). Se puede filtrar por usuario. Se guarda en `/data/audit.jsonl`,
   aparte de los logs de Docker, con un límite de 5000 líneas (configurable con `AUDIT_MAX_LINES`).

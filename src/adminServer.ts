@@ -30,6 +30,7 @@ import {
   defaultExpiryIso,
   encryptApiToken,
   generateAccessToken,
+  generateConfirmCode,
   hashAccessToken,
   hashConfirmCode,
   invalidateCache,
@@ -95,6 +96,12 @@ export function startAdminServer(): void {
     res.json(readStore().users.map(summarize));
   });
 
+  // Sin estado: solo devuelve un código al azar para que el formulario de alta lo use si se pulsa
+  // "Generar". No se guarda nada aquí — el código no existe de verdad hasta que se cree el usuario.
+  app.get("/admin/api/generate-confirm-code", (_req, res) => {
+    res.json({ code: generateConfirmCode() });
+  });
+
   app.post("/admin/api/users", (req, res) => {
     const nombre = typeof req.body?.nombre === "string" ? req.body.nombre.trim() : "";
     const apiToken = typeof req.body?.apiToken === "string" ? req.body.apiToken.trim() : "";
@@ -157,19 +164,27 @@ export function startAdminServer(): void {
   });
 
   app.post("/admin/api/users/:id/set-confirm-code", (req, res) => {
+    const auto = req.body?.auto === true;
     const confirmCode = parseOptionalConfirmCode(req.body);
-    if (confirmCode === undefined) {
-      return res.status(400).json({ error: "Falta el campo confirmCode (vacío para quitar el código propio)." });
+    if (!auto && confirmCode === undefined) {
+      return res.status(400).json({ error: 'Falta "confirmCode" (vacío para quitar el código propio) o "auto": true.' });
     }
 
     const store = readStore();
     const user = store.users.find((u) => u.id === req.params.id);
     if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
 
-    user.confirmCodeHash = confirmCode ? hashConfirmCode(confirmCode) : undefined;
+    const generated = auto ? generateConfirmCode() : undefined;
+    user.confirmCodeHash = generated
+      ? hashConfirmCode(generated)
+      : confirmCode
+        ? hashConfirmCode(confirmCode)
+        : undefined;
     writeStore(store);
     invalidateCache();
-    res.json(summarize(user));
+    // El código generado se devuelve UNA vez, para que el panel lo muestre: es la única ocasión en
+    // que existe en claro fuera de este momento (el resto del tiempo solo se guarda su hash).
+    res.json({ ...summarize(user), ...(generated ? { confirmCode: generated } : {}) });
   });
 
   app.delete("/admin/api/users/:id", (req, res) => {

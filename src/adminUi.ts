@@ -170,10 +170,16 @@ export function renderAdminPage(): string {
 
   <div id="reveal" class="reveal">
     <strong id="revealTitle"></strong>
-    <div class="reveal-label">Token de acceso (se muestra UNA sola vez, no se puede recuperar):</div>
-    <code id="revealToken"></code>
-    <div class="reveal-label">URL para el conector:</div>
-    <code id="revealUrl"></code>
+    <div id="revealTokenWrap">
+      <div class="reveal-label">Token de acceso (se muestra UNA sola vez, no se puede recuperar):</div>
+      <code id="revealToken"></code>
+      <div class="reveal-label">URL para el conector:</div>
+      <code id="revealUrl"></code>
+    </div>
+    <div id="revealCodeWrap" style="display:none;">
+      <div class="reveal-label">Código de confirmación:</div>
+      <code id="revealCode"></code>
+    </div>
     <button id="revealClose" style="margin-top: 10px;">Cerrar</button>
   </div>
 
@@ -182,7 +188,12 @@ export function renderAdminPage(): string {
     <form id="createForm" class="inline">
       <label>Nombre <input id="cNombre" required></label>
       <label>Token M2M de iagestión <input id="cToken" type="password" required></label>
-      <label>Código de confirmación (opcional) <input id="cConfirmCode" type="text" placeholder="p. ej. 4821"></label>
+      <label>Código de confirmación (opcional)
+        <span style="display:flex; gap:6px;">
+          <input id="cConfirmCode" type="text" placeholder="p. ej. 4821" style="flex:1;">
+          <button type="button" id="cGenerateCode">Generar</button>
+        </span>
+      </label>
       <label>Días de validez (opcional) <input id="cDias" type="number" min="1" placeholder="180"></label>
       <button type="submit" class="primary">Crear</button>
     </form>
@@ -257,10 +268,21 @@ export function renderAdminPage(): string {
     return { text: fecha, cls: "badge-ok" };
   }
 
-  function showReveal(title, accessToken, url) {
+  function showReveal(title, accessToken, url, confirmCode) {
     el("revealTitle").textContent = title;
-    el("revealToken").textContent = accessToken;
-    el("revealUrl").textContent = url;
+    if (accessToken) {
+      el("revealToken").textContent = accessToken;
+      el("revealUrl").textContent = url;
+      el("revealTokenWrap").style.display = "block";
+    } else {
+      el("revealTokenWrap").style.display = "none";
+    }
+    if (confirmCode) {
+      el("revealCode").textContent = confirmCode;
+      el("revealCodeWrap").style.display = "block";
+    } else {
+      el("revealCodeWrap").style.display = "none";
+    }
     el("reveal").style.display = "block";
     el("reveal").scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -268,6 +290,7 @@ export function renderAdminPage(): string {
   el("revealClose").addEventListener("click", function () {
     el("reveal").style.display = "none";
     el("revealToken").textContent = "";
+    el("revealCode").textContent = "";
   });
 
   function apiPost(path, body) {
@@ -382,6 +405,17 @@ export function renderAdminPage(): string {
         });
         tdAcciones.appendChild(bConfirmCode);
 
+        var bGenConfirmCode = document.createElement("button");
+        bGenConfirmCode.textContent = "Generar código";
+        bGenConfirmCode.addEventListener("click", function () {
+          if (!window.confirm("¿Generar un código nuevo para " + u.nombre + "? El anterior (si tenía uno) dejará de valer.")) return;
+          apiPost("/admin/api/users/" + u.id + "/set-confirm-code", { auto: true }).then(function (data) {
+            showReveal("Usuario: " + u.nombre + " (código de confirmación regenerado)", null, null, data.confirmCode);
+            loadUsers();
+          }).catch(function (e) { alert(e.message); });
+        });
+        tdAcciones.appendChild(bGenConfirmCode);
+
         var bRevoke = document.createElement("button");
         bRevoke.textContent = "Revocar";
         bRevoke.className = "danger";
@@ -440,6 +474,12 @@ export function renderAdminPage(): string {
     });
   }
 
+  el("cGenerateCode").addEventListener("click", function () {
+    fetch("/admin/api/generate-confirm-code").then(function (r) { return r.json(); }).then(function (data) {
+      el("cConfirmCode").value = data.code;
+    });
+  });
+
   el("createForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var nombre = el("cNombre").value.trim();
@@ -452,7 +492,7 @@ export function renderAdminPage(): string {
     submitBtn.disabled = true;
     apiPost("/admin/api/users", { nombre: nombre, apiToken: token, confirmCode: confirmCode, dias: dias }).then(function (data) {
       el("createForm").reset();
-      showReveal("Usuario: " + data.nombre + " (nuevo)", data.accessToken, data.url);
+      showReveal("Usuario: " + data.nombre + " (nuevo)", data.accessToken, data.url, confirmCode);
       loadUsers();
     }).catch(function (e) {
       el("createMsg").textContent = e.message;

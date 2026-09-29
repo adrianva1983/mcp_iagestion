@@ -23,13 +23,14 @@ cd ~/mcp_iagestion
 ## 2. Da de alta al usuario
 
 ```bash
-docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre Apellido" --confirm-code 4821
+docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre Apellido" --confirm-code
 ```
 
 El `--confirm-code` es opcional: es el código que esa persona debe indicar (en `confirmacion_humana`)
-cuando encadene varias acciones destructivas (actualizar/eliminar) seguidas. Tú eliges el valor y
-se lo comunicas tú mismo. Sin él, depende del código compartido `IAGESTION_CONFIRM_TOKEN` que
-gestiones tú (ver `docs/confirmacion-humana-dinamica.md`).
+cuando encadene varias acciones destructivas (actualizar/eliminar) seguidas. Sin valor detrás (como
+arriba), se autogenera y se muestra una sola vez; si prefieres elegirlo tú, `--confirm-code 4821`.
+Sin este flag, depende del código compartido `IAGESTION_CONFIRM_TOKEN` que gestiones tú (ver
+`docs/confirmacion-humana-dinamica.md`).
 
 El comando pedirá el token M2M de iagestión de esa persona. **Al pegarlo no se ve nada en
 pantalla** (es intencional, para que no quede en el historial de la terminal). Pega
@@ -94,8 +95,8 @@ docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js rotate "No
 # Cambiar su token M2M de iagestión (p. ej. si iagestión se lo ha regenerado)
 docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js set-token "Nombre Apellido"
 
-# Dar de alta o cambiar su código de confirmación humana propio
-docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js set-confirm-code "Nombre Apellido" 4821
+# Dar de alta o cambiar su código de confirmación humana propio (autogenerado, o "... 4821" para elegirlo)
+docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js set-confirm-code "Nombre Apellido"
 
 # Dar de baja (efecto inmediato, no reversible salvo volver a hacer "add")
 docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js revoke "Nombre Apellido"

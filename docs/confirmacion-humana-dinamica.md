@@ -21,11 +21,18 @@ panel web); sin uno, usa el secreto compartido `IAGESTION_CONFIRM_TOKEN`.
    código — deliberadamente breve, sin explicar de nuevo todo el mecanismo
    cada vez.
 
-El código lo define y cambia quien administra el servidor (CLI o panel), y
-se lo comunica a esa persona por el canal que prefiera (nada de esto lo
-automatiza el sistema). Es un secreto **estable**: no caduca por sí solo ni
-se genera uno nuevo en cada uso — para eso está `admin set-confirm-code`,
-cuando haga falta cambiarlo (por ejemplo, si se ha visto expuesto).
+El código lo define quien administra el servidor (CLI o panel), y se lo
+comunica a esa persona por el canal que prefiera (nada de esto lo automatiza
+el sistema). Es un secreto **estable**: no caduca por sí solo ni se genera
+uno nuevo en cada uso — para eso está `admin set-confirm-code`, cuando haga
+falta cambiarlo (por ejemplo, si se ha visto expuesto).
+
+Al crearlo o cambiarlo se puede escribir uno a mano, o dejar que el sistema
+lo genere (`admin add --confirm-code` sin valor, `admin set-confirm-code`
+sin argumento, o el botón "Generar" del panel): 8 caracteres al azar de un
+alfabeto sin símbolos que se confundan al leerlos (sin `0`/`O`, `1`/`I`/`L`,
+`U`), ~6,6 × 10¹¹ combinaciones. Se muestra en claro una única vez; luego
+solo se guarda su hash, igual que si lo hubiera escrito la persona.
 
 ## Alternativas consideradas y descartadas
 
