@@ -281,16 +281,18 @@ function guardDestructiveCall(
     return { blocked: false };
   }
 
-  return {
-    blocked: true,
-    error: jsonRpcError(
-      call.id,
-      -32010,
-      configured
-        ? 'Se requiere confirmación humana. Añade "confirmacion_humana" con tu código de confirmación.'
-        : "Se requiere confirmación humana, pero el servidor no la tiene configurada. Avisa a quien lo administra."
-    ),
-  };
+  // Mensaje deliberadamente una pregunta directa en primera persona ("¿Cuál es?"), no una
+  // descripción en tercera persona de lo ocurrido: así el LLM tiende a preguntárselo al usuario
+  // tal cual, en vez de narrarle el bloqueo. También dice de forma explícita que la aprobación
+  // caduca, para que quede claro que hará falta pedirla de nuevo pasada esta ventana.
+  const windowMinutes = DESTRUCTIVE_WINDOW_MS / 60_000;
+  const question = configured
+    ? providedConfirmation
+      ? `Ese código no es correcto. ¿Cuál es tu código de confirmación? (Válido solo los próximos ${windowMinutes} minutos; pasado ese tiempo volveré a pedirlo.)`
+      : `Necesito tu código de confirmación para seguir. ¿Cuál es? (Válido solo los próximos ${windowMinutes} minutos; pasado ese tiempo volveré a pedirlo.)`
+    : "No puedo continuar: el servidor no tiene configurada la confirmación humana para esta acción. Avisa a quien lo administra.";
+
+  return { blocked: true, error: jsonRpcError(call.id, -32010, question) };
 }
 
 async function main(): Promise<void> {
