@@ -41,12 +41,16 @@ Al cerrar la sesión SSH se cierra también el acceso al panel.
   como con `admin add`.
 - **Tabla de usuarios**: fecha de alta, caducidad (con aviso si quedan 14 días o menos, o
   "caducado"), último uso, si tiene código de confirmación propio o usa el compartido, y botones
-  para **rotar** el token de acceso, **cambiar** el token de iagestión, **cambiar** el código de
-  confirmación (a mano), **generar código** (uno nuevo al azar, mostrado una vez) o **revocar** al
-  usuario.
+  para **rotar** el token de acceso, **cambiar** el token de iagestión, **código de confirmación**
+  (un único diálogo: escríbelo a mano, pulsa "Generar" para uno al azar, o déjalo vacío para volver
+  al compartido) o **revocar** al usuario.
 - **Actividad reciente**: las últimas llamadas a tools, con fecha, usuario y nombre de la tool
-  (nunca argumentos ni tokens). Se puede filtrar por usuario. Se guarda en `/data/audit.jsonl`,
-  aparte de los logs de Docker, con un límite de 5000 líneas (configurable con `AUDIT_MAX_LINES`).
+  (nunca argumentos ni tokens). Por defecto solo la última hora; hay un selector para ampliar a
+  24 horas, 7 días o todo, además del filtro por usuario. Se guarda en `/data/audit.jsonl`, aparte
+  de los logs de Docker, con un límite de 5000 líneas (configurable con `AUDIT_MAX_LINES`).
+
+Todas las confirmaciones y peticiones de datos del panel (rotar, cambiar token, código de
+confirmación, revocar) usan un diálogo propio, no los `prompt`/`confirm`/`alert` del navegador.
 
 ## Configuración
 

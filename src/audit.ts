@@ -52,8 +52,13 @@ function trimIfNeeded(): void {
   }
 }
 
-/** Las `limit` entradas más recientes, más nuevas primero, filtradas por usuario si se indica. */
-export function readRecent(limit = 200, userId?: string): AuditEntry[] {
+/**
+ * Las `limit` entradas más recientes, más nuevas primero, filtradas por usuario y/o por fecha
+ * (`sinceMs`, epoch ms) si se indican. El fichero se escribe siempre en orden cronológico
+ * (append-only), así que al recorrerlo de más nuevo a más antiguo, en cuanto una entrada es
+ * anterior a `sinceMs` todas las que quedan por delante también lo son — se puede cortar ahí.
+ */
+export function readRecent(limit = 200, userId?: string, sinceMs?: number): AuditEntry[] {
   if (!existsSync(AUDIT_FILE)) return [];
   const lines = readFileSync(AUDIT_FILE, "utf8").split("\n").filter(Boolean);
   const out: AuditEntry[] = [];
@@ -64,6 +69,7 @@ export function readRecent(limit = 200, userId?: string): AuditEntry[] {
     } catch {
       continue; // línea corrupta (p. ej. un corte a medias): se ignora
     }
+    if (sinceMs !== undefined && new Date(entry.ts).getTime() < sinceMs) break;
     if (userId && entry.userId !== userId) continue;
     out.push(entry);
   }

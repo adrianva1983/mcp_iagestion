@@ -197,10 +197,20 @@ export function startAdminServer(): void {
     res.status(204).end();
   });
 
+  const AUDIT_RANGES: Record<string, number | undefined> = {
+    "1h": 3_600_000,
+    "24h": 86_400_000,
+    "7d": 7 * 86_400_000,
+    all: undefined,
+  };
+
   app.get("/admin/api/audit", (req, res) => {
     const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
     const userId = typeof req.query.userId === "string" && req.query.userId ? req.query.userId : undefined;
-    res.json(readRecent(limit, userId));
+    const range = typeof req.query.range === "string" && req.query.range in AUDIT_RANGES ? req.query.range : "1h";
+    const rangeMs = AUDIT_RANGES[range];
+    const sinceMs = rangeMs === undefined ? undefined : Date.now() - rangeMs;
+    res.json(readRecent(limit, userId, sinceMs));
   });
 
   const server = app.listen(ADMIN_PORT, "0.0.0.0", () => {

@@ -87,8 +87,8 @@ export function renderAdminPage(): string {
     font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
     margin: 0; padding: 32px 20px 80px; background: var(--bg); color: var(--text);
   }
-  .wrap { max-width: 980px; margin-inline: auto; }
-  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+  .wrap { max-width: 1080px; margin-inline: auto; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; flex-wrap: wrap; }
   .topbar-left { display: flex; align-items: center; gap: 12px; }
   .mark {
     width: 36px; height: 36px; border-radius: 9px; background: var(--accent); color: #fff;
@@ -102,11 +102,12 @@ export function renderAdminPage(): string {
     box-shadow: var(--shadow); padding: 22px 24px; margin-bottom: 20px;
   }
   .card h2 { font-size: 0.95rem; margin: 0 0 16px; font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
   th, td { text-align: left; padding: 10px 8px; vertical-align: middle; }
   thead th {
     color: var(--text-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase;
-    letter-spacing: 0.04em; border-bottom: 1px solid var(--border); padding-bottom: 10px;
+    letter-spacing: 0.04em; border-bottom: 1px solid var(--border); padding-bottom: 10px; white-space: nowrap;
   }
   tbody tr { border-bottom: 1px solid var(--border); }
   tbody tr:last-child { border-bottom: none; }
@@ -122,7 +123,7 @@ export function renderAdminPage(): string {
   .badge-neutral { background: var(--neutral-soft); color: var(--text-muted); }
   button {
     cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text);
-    border-radius: 7px; padding: 6px 12px; font-size: 0.82rem; font-weight: 500; margin-right: 6px;
+    border-radius: 7px; padding: 6px 12px; font-size: 0.82rem; font-weight: 500;
     transition: background-color 0.12s, border-color 0.12s;
   }
   button:hover { background: var(--neutral-soft); }
@@ -131,6 +132,7 @@ export function renderAdminPage(): string {
   button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
   button.danger { border-color: var(--danger-soft); color: var(--danger); background: var(--danger-soft); }
   button.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 320px; }
   form.inline { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; }
   form.inline label { display: flex; flex-direction: column; font-size: 0.78rem; color: var(--text-muted); gap: 5px; font-weight: 500; }
   input, select {
@@ -151,8 +153,20 @@ export function renderAdminPage(): string {
   }
   .msg { font-size: 0.83rem; margin-top: 10px; }
   .msg.error { color: var(--danger); }
-  .actions { white-space: nowrap; }
-  .audit-toolbar { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; }
+  .audit-toolbar { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(10, 12, 18, 0.5);
+    display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px;
+  }
+  .modal-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 22px 24px; width: 100%; max-width: 400px;
+  }
+  .modal-box h3 { margin: 0 0 6px; font-size: 1rem; font-weight: 600; }
+  #modalMessage { white-space: pre-line; margin: 0 0 4px; }
+  #modalInputWrap { display: flex; gap: 6px; margin-top: 10px; }
+  #modalInputWrap input { flex: 1; min-width: 0; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 </style>
 </head>
 <body>
@@ -177,7 +191,7 @@ export function renderAdminPage(): string {
       <code id="revealUrl"></code>
     </div>
     <div id="revealCodeWrap" style="display:none;">
-      <div class="reveal-label">Código de confirmación:</div>
+      <div class="reveal-label">Código de confirmación (se muestra UNA sola vez, no se puede recuperar):</div>
       <code id="revealCode"></code>
     </div>
     <button id="revealClose" style="margin-top: 10px;">Cerrar</button>
@@ -203,22 +217,47 @@ export function renderAdminPage(): string {
 
   <div class="card">
     <h2>Usuarios</h2>
-    <table id="usersTable">
-      <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Confirmación</th><th>Acciones</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div class="table-wrap">
+      <table id="usersTable">
+        <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Confirmación</th><th>Acciones</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="card">
     <h2>Actividad reciente</h2>
     <div class="audit-toolbar">
       <select id="auditFilter"><option value="">Todos los usuarios</option></select>
+      <select id="auditRange">
+        <option value="1h">Última hora</option>
+        <option value="24h">Últimas 24 horas</option>
+        <option value="7d">Últimos 7 días</option>
+        <option value="all">Todo</option>
+      </select>
       <button id="auditRefresh">Actualizar</button>
     </div>
-    <table id="auditTable">
-      <thead><tr><th>Fecha</th><th>Usuario</th><th>Tool</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div class="table-wrap">
+      <table id="auditTable">
+        <thead><tr><th>Fecha</th><th>Usuario</th><th>Tool</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <h3 id="modalTitle"></h3>
+    <p id="modalMessage"></p>
+    <div id="modalInputWrap">
+      <input id="modalInput">
+      <button type="button" id="modalExtra" style="display:none;"></button>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="modalCancel">Cancelar</button>
+      <button type="button" id="modalConfirm" class="primary">Aceptar</button>
+    </div>
   </div>
 </div>
 
@@ -227,6 +266,94 @@ export function renderAdminPage(): string {
   "use strict";
 
   function el(id) { return document.getElementById(id); }
+
+  // ---------------------------------------------------------------------
+  // Modal genérico (sustituye a prompt/confirm/alert nativos). Devuelve una
+  // promesa: el valor del input (o true) al aceptar, null (o false) al
+  // cancelar. opts.extra permite un botón adicional dentro del diálogo (lo
+  // usa "Código de confirmación" para su botón "Generar").
+  // ---------------------------------------------------------------------
+  function openModal(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      el("modalTitle").textContent = opts.title || "";
+
+      var msgEl = el("modalMessage");
+      if (opts.message) {
+        msgEl.textContent = opts.message;
+        msgEl.style.display = "block";
+      } else {
+        msgEl.style.display = "none";
+      }
+
+      var inputWrap = el("modalInputWrap");
+      var input = el("modalInput");
+      if (opts.withInput) {
+        inputWrap.style.display = "flex";
+        input.type = opts.inputType || "text";
+        input.value = opts.inputValue || "";
+        input.placeholder = opts.inputPlaceholder || "";
+      } else {
+        inputWrap.style.display = "none";
+      }
+
+      var extraBtn = el("modalExtra");
+      var onExtra = null;
+      if (opts.extra) {
+        extraBtn.style.display = "inline-block";
+        extraBtn.textContent = opts.extra.label;
+        onExtra = function () { opts.extra.onClick(input); };
+        extraBtn.addEventListener("click", onExtra);
+      } else {
+        extraBtn.style.display = "none";
+      }
+
+      el("modalConfirm").textContent = opts.confirmText || "Aceptar";
+      el("modalConfirm").className = opts.danger ? "danger" : "primary";
+      el("modalCancel").style.display = opts.hideCancel ? "none" : "inline-block";
+      el("modalCancel").textContent = opts.cancelText || "Cancelar";
+
+      function cleanup(result) {
+        el("modalOverlay").style.display = "none";
+        el("modalConfirm").removeEventListener("click", onConfirm);
+        el("modalCancel").removeEventListener("click", onCancel);
+        el("modalOverlay").removeEventListener("mousedown", onOverlayClick);
+        document.removeEventListener("keydown", onKeydown);
+        if (onExtra) extraBtn.removeEventListener("click", onExtra);
+        resolve(result);
+      }
+      function onConfirm() { cleanup(opts.withInput ? input.value : true); }
+      function onCancel() { cleanup(opts.withInput ? null : false); }
+      function onOverlayClick(e) { if (e.target === el("modalOverlay")) onCancel(); }
+      function onKeydown(e) {
+        if (e.key === "Escape") onCancel();
+        else if (e.key === "Enter" && opts.withInput && document.activeElement === input) onConfirm();
+      }
+
+      el("modalConfirm").addEventListener("click", onConfirm);
+      el("modalCancel").addEventListener("click", onCancel);
+      el("modalOverlay").addEventListener("mousedown", onOverlayClick);
+      document.addEventListener("keydown", onKeydown);
+
+      el("modalOverlay").style.display = "flex";
+      if (opts.withInput) { input.focus(); if (input.select) input.select(); }
+      else if (!opts.hideCancel) el("modalConfirm").focus();
+    });
+  }
+
+  function showAlert(title, message) {
+    return openModal({ title: title, message: message, hideCancel: true, confirmText: "Vale" });
+  }
+  function showConfirm(title, message, danger) {
+    return openModal({ title: title, message: message, confirmText: danger ? "Sí, continuar" : "Confirmar", danger: !!danger });
+  }
+  function showPrompt(title, message, options) {
+    var merged = { title: title, message: message, withInput: true, confirmText: "Guardar" };
+    for (var k in options) if (Object.prototype.hasOwnProperty.call(options, k)) merged[k] = options[k];
+    return openModal(merged);
+  }
+
+  // ---------------------------------------------------------------------
 
   function isDarkNow() {
     var attr = document.documentElement.getAttribute("data-theme");
@@ -373,57 +500,75 @@ export function renderAdminPage(): string {
         var bRotate = document.createElement("button");
         bRotate.textContent = "Rotar";
         bRotate.addEventListener("click", function () {
-          var dias = window.prompt("Días de validez del nuevo token (vacío = por defecto):", "");
-          var body = {};
-          if (dias) body.dias = Number(dias);
-          apiPost("/admin/api/users/" + u.id + "/rotate", body).then(function (data) {
-            showReveal("Usuario: " + u.nombre + " (token regenerado)", data.accessToken, data.url);
-            loadUsers();
-          }).catch(function (e) { alert(e.message); });
+          showPrompt(
+            "Rotar token de acceso",
+            "Días de validez del nuevo token para " + u.nombre + " (vacío = por defecto).",
+            { inputType: "number", inputPlaceholder: "180" }
+          ).then(function (dias) {
+            if (dias === null) return;
+            var body = {};
+            if (dias) body.dias = Number(dias);
+            return apiPost("/admin/api/users/" + u.id + "/rotate", body).then(function (data) {
+              showReveal("Usuario: " + u.nombre + " (token regenerado)", data.accessToken, data.url);
+              loadUsers();
+            });
+          }).catch(function (e) { showAlert("Error", e.message); });
         });
         tdAcciones.appendChild(bRotate);
 
         var bToken = document.createElement("button");
         bToken.textContent = "Cambiar token iagestión";
         bToken.addEventListener("click", function () {
-          var tok = window.prompt("Nuevo token M2M de iagestión para " + u.nombre + ":", "");
-          if (!tok) return;
-          apiPost("/admin/api/users/" + u.id + "/set-token", { apiToken: tok }).then(function () {
-            alert("Token de iagestión actualizado.");
-          }).catch(function (e) { alert(e.message); });
+          showPrompt(
+            "Cambiar token de iagestión",
+            "Nuevo token M2M de iagestión para " + u.nombre + ".",
+            { inputType: "password" }
+          ).then(function (tok) {
+            if (!tok) return;
+            return apiPost("/admin/api/users/" + u.id + "/set-token", { apiToken: tok }).then(function () {
+              return showAlert("Listo", "Token de iagestión actualizado para " + u.nombre + ".");
+            });
+          }).catch(function (e) { showAlert("Error", e.message); });
         });
         tdAcciones.appendChild(bToken);
 
         var bConfirmCode = document.createElement("button");
-        bConfirmCode.textContent = "Cambiar código";
+        bConfirmCode.textContent = "Código de confirmación";
         bConfirmCode.addEventListener("click", function () {
-          var code = window.prompt("Código de confirmación para " + u.nombre + " (vacío para quitarlo y usar el compartido):", "");
-          if (code === null) return;
-          apiPost("/admin/api/users/" + u.id + "/set-confirm-code", { confirmCode: code.trim() }).then(function () {
-            loadUsers();
-          }).catch(function (e) { alert(e.message); });
+          showPrompt(
+            "Código de confirmación",
+            "Para " + u.nombre + ". Escríbelo, pulsa \\"Generar\\" para uno al azar, o déjalo vacío para volver al compartido.",
+            {
+              inputPlaceholder: "vacío = compartido",
+              extra: {
+                label: "Generar",
+                onClick: function (input) {
+                  fetch("/admin/api/generate-confirm-code").then(function (r) { return r.json(); }).then(function (data) {
+                    input.value = data.code;
+                    input.focus();
+                  });
+                },
+              },
+            }
+          ).then(function (code) {
+            if (code === null) return;
+            var trimmed = code.trim();
+            return apiPost("/admin/api/users/" + u.id + "/set-confirm-code", { confirmCode: trimmed }).then(function () {
+              loadUsers();
+              if (trimmed) showReveal("Usuario: " + u.nombre + " (código de confirmación actualizado)", null, null, trimmed);
+            });
+          }).catch(function (e) { showAlert("Error", e.message); });
         });
         tdAcciones.appendChild(bConfirmCode);
-
-        var bGenConfirmCode = document.createElement("button");
-        bGenConfirmCode.textContent = "Generar código";
-        bGenConfirmCode.addEventListener("click", function () {
-          if (!window.confirm("¿Generar un código nuevo para " + u.nombre + "? El anterior (si tenía uno) dejará de valer.")) return;
-          apiPost("/admin/api/users/" + u.id + "/set-confirm-code", { auto: true }).then(function (data) {
-            showReveal("Usuario: " + u.nombre + " (código de confirmación regenerado)", null, null, data.confirmCode);
-            loadUsers();
-          }).catch(function (e) { alert(e.message); });
-        });
-        tdAcciones.appendChild(bGenConfirmCode);
 
         var bRevoke = document.createElement("button");
         bRevoke.textContent = "Revocar";
         bRevoke.className = "danger";
         bRevoke.addEventListener("click", function () {
-          if (!window.confirm("¿Revocar a " + u.nombre + "? Dejará de poder conectar de inmediato.")) return;
-          apiDelete("/admin/api/users/" + u.id).then(function () {
-            loadUsers();
-          }).catch(function (e) { alert(e.message); });
+          showConfirm("Revocar usuario", "¿Revocar a " + u.nombre + "? Dejará de poder conectar de inmediato.", true).then(function (ok) {
+            if (!ok) return;
+            return apiDelete("/admin/api/users/" + u.id).then(function () { loadUsers(); });
+          }).catch(function (e) { showAlert("Error", e.message); });
         });
         tdAcciones.appendChild(bRevoke);
 
@@ -442,7 +587,8 @@ export function renderAdminPage(): string {
 
   function loadAudit() {
     var userId = el("auditFilter").value;
-    var url = "/admin/api/audit?limit=200" + (userId ? "&userId=" + encodeURIComponent(userId) : "");
+    var range = el("auditRange").value;
+    var url = "/admin/api/audit?limit=200&range=" + encodeURIComponent(range) + (userId ? "&userId=" + encodeURIComponent(userId) : "");
     fetch(url).then(function (r) { return r.json(); }).then(function (entries) {
       var tbody = el("auditTable").querySelector("tbody");
       tbody.innerHTML = "";
@@ -452,7 +598,7 @@ export function renderAdminPage(): string {
         var tdEmpty = document.createElement("td");
         tdEmpty.colSpan = 3;
         tdEmpty.className = "empty";
-        tdEmpty.textContent = "Sin actividad todavía.";
+        tdEmpty.textContent = "Sin actividad en este periodo.";
         trEmpty.appendChild(tdEmpty);
         tbody.appendChild(trEmpty);
         return;
@@ -503,6 +649,7 @@ export function renderAdminPage(): string {
   });
 
   el("auditFilter").addEventListener("change", loadAudit);
+  el("auditRange").addEventListener("change", loadAudit);
   el("auditRefresh").addEventListener("click", loadAudit);
 
   loadUsers();
