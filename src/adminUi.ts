@@ -12,66 +12,193 @@ export function renderAdminPage(): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panel de administración — iagestión MCP</title>
+<script>
+  // Aplica el tema guardado ANTES de pintar la página, para no dar un parpadeo del tema equivocado.
+  (function () {
+    try {
+      var t = localStorage.getItem("mcp-admin-theme");
+      if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { /* almacenamiento no disponible (privado/bloqueado): se queda en el tema del sistema */ }
+  })();
+</script>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; max-width: 960px; margin-inline: auto; }
-  h1 { font-size: 1.3rem; margin-bottom: 4px; }
-  .sub { color: #666; font-size: 0.9rem; margin-bottom: 24px; }
-  section { margin-bottom: 32px; }
-  h2 { font-size: 1.05rem; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
-  th { color: #666; font-weight: 600; }
-  .warn { color: #b45309; }
-  .bad { color: #b91c1c; font-weight: 600; }
-  button { cursor: pointer; border: 1px solid #ccc; background: #fafafa; border-radius: 6px; padding: 4px 10px; font-size: 0.85rem; margin-right: 4px; }
-  button:hover { background: #f0f0f0; }
-  button.danger { border-color: #f3c2c2; color: #b91c1c; }
-  form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
-  form.inline label { display: flex; flex-direction: column; font-size: 0.8rem; color: #555; gap: 2px; }
-  input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.9rem; }
-  .reveal { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 14px; margin-bottom: 16px; display: none; }
-  .reveal code { display: block; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 6px; margin: 8px 0; word-break: break-all; font-size: 0.8rem; }
-  .msg { font-size: 0.85rem; margin: 8px 0; }
-  .msg.error { color: #b91c1c; }
-  select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #e5e7eb;
+    --text: #111827;
+    --text-muted: #6b7280;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-soft: #eef2ff;
+    --danger: #dc2626;
+    --danger-soft: #fef2f2;
+    --warn: #b45309;
+    --warn-soft: #fffbeb;
+    --ok: #15803d;
+    --ok-soft: #f0fdf4;
+    --neutral-soft: #f3f4f6;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 8px rgba(15, 23, 42, 0.03);
+  }
+  /* Oscuro por preferencia del sistema, salvo que se haya elegido "light" a mano (botón, abajo). */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115;
+      --surface: #171a21;
+      --border: #2a2e37;
+      --text: #e5e7eb;
+      --text-muted: #9199a8;
+      --accent: #818cf8;
+      --accent-hover: #a5b0fb;
+      --accent-soft: #1e2333;
+      --danger: #f87171;
+      --danger-soft: #2a1618;
+      --warn: #fbbf59;
+      --warn-soft: #2a2013;
+      --ok: #4ade80;
+      --ok-soft: #142218;
+      --neutral-soft: #1f232c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+  }
+  /* Oscuro elegido a mano, sea cual sea la preferencia del sistema. */
+  :root[data-theme="dark"] {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --border: #2a2e37;
+    --text: #e5e7eb;
+    --text-muted: #9199a8;
+    --accent: #818cf8;
+    --accent-hover: #a5b0fb;
+    --accent-soft: #1e2333;
+    --danger: #f87171;
+    --danger-soft: #2a1618;
+    --warn: #fbbf59;
+    --warn-soft: #2a2013;
+    --ok: #4ade80;
+    --ok-soft: #142218;
+    --neutral-soft: #1f232c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    margin: 0; padding: 32px 20px 80px; background: var(--bg); color: var(--text);
+  }
+  .wrap { max-width: 980px; margin-inline: auto; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .mark {
+    width: 36px; height: 36px; border-radius: 9px; background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem;
+    letter-spacing: -0.02em; flex-shrink: 0;
+  }
+  h1 { font-size: 1.15rem; margin: 0; font-weight: 600; }
+  .sub { color: var(--text-muted); font-size: 0.85rem; margin: 2px 0 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 22px 24px; margin-bottom: 20px;
+  }
+  .card h2 { font-size: 0.95rem; margin: 0 0 16px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+  th, td { text-align: left; padding: 10px 8px; vertical-align: middle; }
+  thead th {
+    color: var(--text-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.04em; border-bottom: 1px solid var(--border); padding-bottom: 10px;
+  }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--neutral-soft); }
+  .empty { color: var(--text-muted); font-size: 0.85rem; padding: 18px 8px; text-align: center; }
+  .badge {
+    display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+  }
+  .badge-ok { background: var(--ok-soft); color: var(--ok); }
+  .badge-warn { background: var(--warn-soft); color: var(--warn); }
+  .badge-bad { background: var(--danger-soft); color: var(--danger); }
+  .badge-neutral { background: var(--neutral-soft); color: var(--text-muted); }
+  button {
+    cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: 7px; padding: 6px 12px; font-size: 0.82rem; font-weight: 500; margin-right: 6px;
+    transition: background-color 0.12s, border-color 0.12s;
+  }
+  button:hover { background: var(--neutral-soft); }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button.danger { border-color: var(--danger-soft); color: var(--danger); background: var(--danger-soft); }
+  button.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+  form.inline { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; }
+  form.inline label { display: flex; flex-direction: column; font-size: 0.78rem; color: var(--text-muted); gap: 5px; font-weight: 500; }
+  input, select {
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 0.87rem;
+    background: var(--surface); color: var(--text); min-width: 160px;
+  }
+  input:focus, select:focus, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .reveal {
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 16px 20px; margin-bottom: 20px; display: none;
+  }
+  .reveal .reveal-label { font-size: 0.78rem; color: var(--text-muted); margin: 10px 0 4px; font-weight: 500; }
+  .reveal code {
+    display: block; background: #14161b; color: #d4d4d4; padding: 10px 12px; border-radius: 7px;
+    word-break: break-all; font-size: 0.8rem; line-height: 1.5;
+  }
+  .msg { font-size: 0.83rem; margin-top: 10px; }
+  .msg.error { color: var(--danger); }
+  .actions { white-space: nowrap; }
+  .audit-toolbar { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; }
 </style>
 </head>
 <body>
-  <h1>Panel de administración — iagestión MCP</h1>
-  <div class="sub">Solo accesible por túnel SSH. No compartas lo que veas aquí.</div>
+<div class="wrap">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="mark">MCP</div>
+      <div>
+        <h1>Panel de administración — iagestión MCP</h1>
+        <p class="sub">Solo accesible por túnel SSH. No compartas lo que veas aquí.</p>
+      </div>
+    </div>
+    <button id="themeToggle" type="button">Modo oscuro</button>
+  </div>
 
   <div id="reveal" class="reveal">
     <strong id="revealTitle"></strong>
-    <div>Token de acceso (se muestra UNA sola vez, no se puede recuperar):</div>
+    <div class="reveal-label">Token de acceso (se muestra UNA sola vez, no se puede recuperar):</div>
     <code id="revealToken"></code>
-    <div>URL para el conector:</div>
+    <div class="reveal-label">URL para el conector:</div>
     <code id="revealUrl"></code>
-    <button id="revealClose">Cerrar</button>
+    <button id="revealClose" style="margin-top: 10px;">Cerrar</button>
   </div>
 
-  <section>
+  <div class="card">
     <h2>Nuevo usuario</h2>
     <form id="createForm" class="inline">
       <label>Nombre <input id="cNombre" required></label>
       <label>Token M2M de iagestión <input id="cToken" type="password" required></label>
       <label>Días de validez (opcional) <input id="cDias" type="number" min="1" placeholder="180"></label>
-      <button type="submit">Crear</button>
+      <button type="submit" class="primary">Crear</button>
     </form>
     <div id="createMsg" class="msg"></div>
-  </section>
+  </div>
 
-  <section>
+  <div class="card">
     <h2>Usuarios</h2>
     <table id="usersTable">
       <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Acciones</th></tr></thead>
       <tbody></tbody>
     </table>
-  </section>
+  </div>
 
-  <section>
+  <div class="card">
     <h2>Actividad reciente</h2>
-    <div class="inline" style="margin-bottom:8px;">
+    <div class="audit-toolbar">
       <select id="auditFilter"><option value="">Todos los usuarios</option></select>
       <button id="auditRefresh">Actualizar</button>
     </div>
@@ -79,7 +206,8 @@ export function renderAdminPage(): string {
       <thead><tr><th>Fecha</th><th>Usuario</th><th>Tool</th></tr></thead>
       <tbody></tbody>
     </table>
-  </section>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -87,22 +215,44 @@ export function renderAdminPage(): string {
 
   function el(id) { return document.getElementById(id); }
 
+  function isDarkNow() {
+    var attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark") return true;
+    if (attr === "light") return false;
+    return Boolean(window.matchMedia) && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  function updateThemeButton() {
+    el("themeToggle").textContent = isDarkNow() ? "Modo claro" : "Modo oscuro";
+  }
+
+  function setTheme(theme) {
+    // theme: "light" | "dark" | null (vuelve a seguir la preferencia del sistema)
+    if (theme) document.documentElement.setAttribute("data-theme", theme);
+    else document.documentElement.removeAttribute("data-theme");
+    try {
+      if (theme) localStorage.setItem("mcp-admin-theme", theme);
+      else localStorage.removeItem("mcp-admin-theme");
+    } catch (e) { /* sin almacenamiento persistente: el tema elegido dura solo esta carga */ }
+    updateThemeButton();
+  }
+
+  el("themeToggle").addEventListener("click", function () {
+    setTheme(isDarkNow() ? "light" : "dark");
+  });
+  updateThemeButton();
+
   function fmtDate(iso) {
     if (!iso) return "-";
     return iso.slice(0, 10);
   }
 
-  function expiraLabel(u) {
-    if (!u.expiresAt) return "nunca";
-    if (u.expirado) return u.expiresAt.slice(0, 10) + " (caducado)";
-    if (u.diasRestantes !== null && u.diasRestantes <= 14) return u.expiresAt.slice(0, 10) + " (" + u.diasRestantes + " días)";
-    return u.expiresAt.slice(0, 10);
-  }
-
-  function expiraClass(u) {
-    if (u.expirado) return "bad";
-    if (u.diasRestantes !== null && u.diasRestantes <= 14) return "warn";
-    return "";
+  function expiraBadge(u) {
+    if (!u.expiresAt) return { text: "nunca", cls: "badge-neutral" };
+    var fecha = u.expiresAt.slice(0, 10);
+    if (u.expirado) return { text: fecha + " · caducado", cls: "badge-bad" };
+    if (u.diasRestantes !== null && u.diasRestantes <= 14) return { text: fecha + " · " + u.diasRestantes + " días", cls: "badge-warn" };
+    return { text: fecha, cls: "badge-ok" };
   }
 
   function showReveal(title, accessToken, url) {
@@ -110,7 +260,7 @@ export function renderAdminPage(): string {
     el("revealToken").textContent = accessToken;
     el("revealUrl").textContent = url;
     el("reveal").style.display = "block";
-    el("reveal").scrollIntoView({ behavior: "smooth" });
+    el("reveal").scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   el("revealClose").addEventListener("click", function () {
@@ -142,9 +292,20 @@ export function renderAdminPage(): string {
     fetch("/admin/api/users").then(function (r) { return r.json(); }).then(function (users) {
       var tbody = el("usersTable").querySelector("tbody");
       tbody.innerHTML = "";
+
       var select = el("auditFilter");
       var currentFilter = select.value;
       select.innerHTML = '<option value="">Todos los usuarios</option>';
+
+      if (users.length === 0) {
+        var trEmpty = document.createElement("tr");
+        var tdEmpty = document.createElement("td");
+        tdEmpty.colSpan = 5;
+        tdEmpty.className = "empty";
+        tdEmpty.textContent = "No hay usuarios dados de alta todavía.";
+        trEmpty.appendChild(tdEmpty);
+        tbody.appendChild(trEmpty);
+      }
 
       users.forEach(function (u) {
         var tr = document.createElement("tr");
@@ -158,8 +319,11 @@ export function renderAdminPage(): string {
         tr.appendChild(tdAlta);
 
         var tdExpira = document.createElement("td");
-        tdExpira.textContent = expiraLabel(u);
-        tdExpira.className = expiraClass(u);
+        var badge = expiraBadge(u);
+        var span = document.createElement("span");
+        span.className = "badge " + badge.cls;
+        span.textContent = badge.text;
+        tdExpira.appendChild(span);
         tr.appendChild(tdExpira);
 
         var tdUltimo = document.createElement("td");
@@ -167,6 +331,7 @@ export function renderAdminPage(): string {
         tr.appendChild(tdUltimo);
 
         var tdAcciones = document.createElement("td");
+        tdAcciones.className = "actions";
 
         var bRotate = document.createElement("button");
         bRotate.textContent = "Rotar";
@@ -222,6 +387,18 @@ export function renderAdminPage(): string {
     fetch(url).then(function (r) { return r.json(); }).then(function (entries) {
       var tbody = el("auditTable").querySelector("tbody");
       tbody.innerHTML = "";
+
+      if (entries.length === 0) {
+        var trEmpty = document.createElement("tr");
+        var tdEmpty = document.createElement("td");
+        tdEmpty.colSpan = 3;
+        tdEmpty.className = "empty";
+        tdEmpty.textContent = "Sin actividad todavía.";
+        trEmpty.appendChild(tdEmpty);
+        tbody.appendChild(trEmpty);
+        return;
+      }
+
       entries.forEach(function (e) {
         var tr = document.createElement("tr");
         var tdTs = document.createElement("td");
@@ -243,8 +420,10 @@ export function renderAdminPage(): string {
     var nombre = el("cNombre").value.trim();
     var token = el("cToken").value.trim();
     var dias = el("cDias").value ? Number(el("cDias").value) : undefined;
+    var submitBtn = el("createForm").querySelector("button[type=submit]");
     el("createMsg").textContent = "";
     el("createMsg").className = "msg";
+    submitBtn.disabled = true;
     apiPost("/admin/api/users", { nombre: nombre, apiToken: token, dias: dias }).then(function (data) {
       el("createForm").reset();
       showReveal("Usuario: " + data.nombre + " (nuevo)", data.accessToken, data.url);
@@ -252,6 +431,8 @@ export function renderAdminPage(): string {
     }).catch(function (e) {
       el("createMsg").textContent = e.message;
       el("createMsg").className = "msg error";
+    }).finally(function () {
+      submitBtn.disabled = false;
     });
   });
 
