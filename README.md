@@ -93,8 +93,9 @@ directo del usuario) implementa dos capas adicionales, pensadas para cuando el s
 expuesto a internet (túnel, PaaS...).
 
 **Multiusuario**: cada usuario tiene su propio token de acceso y su propio token M2M de iagestión
-(cifrado en reposo), y las altas/bajas se hacen con `node dist/admin.js` sin reiniciar. Guía
-completa en [docs/multiusuario.md](docs/multiusuario.md). Además:
+(cifrado en reposo), y las altas/bajas se hacen con `node dist/admin.js` (o desde el panel web,
+[docs/panel-administracion.md](docs/panel-administracion.md)) sin reiniciar. Guía completa en
+[docs/multiusuario.md](docs/multiusuario.md). Además:
 
 - **Rate limiting**: máx. 30 peticiones/minuto por usuario. Al superarlo, responde
   `HTTP 429` con cabecera `Retry-After` y un mensaje indicando cuándo se restablece.

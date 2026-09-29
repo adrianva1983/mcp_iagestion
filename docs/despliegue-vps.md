@@ -56,6 +56,9 @@ mcp-admin add "Ana Pérez"
 
 Muestra el token de acceso y la URL para el conector una única vez. Más comandos en [multiusuario.md](multiusuario.md).
 
+También hay un panel web para lo mismo (y para ver la actividad reciente), accesible por túnel
+SSH sin contraseña propia: [docs/panel-administracion.md](panel-administracion.md).
+
 ## Operación
 
 ```bash

@@ -15,7 +15,9 @@
 
 import { randomBytes } from "node:crypto";
 import {
+  TOKEN_TTL_DAYS_DEFAULT,
   USERS_FILE,
+  defaultExpiryIso,
   encryptApiToken,
   generateAccessToken,
   hashAccessToken,
@@ -65,6 +67,15 @@ async function readSecret(prompt: string): Promise<string> {
   });
 }
 
+/** Saca "--dias N" de la lista de argumentos (usado por add/rotate para fijar una caducidad distinta de la por defecto). */
+function extractDiasFlag(args: string[]): { rest: string[]; dias?: number } {
+  const idx = args.findIndex((a) => a === "--dias");
+  if (idx === -1) return { rest: args };
+  const dias = Number(args[idx + 1]);
+  if (!Number.isFinite(dias) || dias <= 0) fail('"--dias" debe ir seguido de un número de días positivo.');
+  return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], dias };
+}
+
 function findUser(users: UserRecord[], ref: string | undefined): UserRecord {
   if (!ref) fail("Indica el id o el nombre del usuario.");
   const matches = users.filter((u) => u.id === ref || u.nombre.toLowerCase() === ref.toLowerCase());
@@ -78,6 +89,7 @@ function printAccess(user: UserRecord, token: string): void {
   console.log(`\nUsuario: ${user.nombre} (id ${user.id})`);
   console.log("Token de acceso (se muestra UNA sola vez, no se puede recuperar):");
   console.log(`  ${token}`);
+  console.log(`Caduca: ${user.expiresAt.slice(0, 10)} (renuévalo antes con "admin rotate" si sigue en uso)`);
   console.log("URL para el conector remoto (clientes que solo admiten pegar una URL):");
   console.log(`  ${base}/mcp/${token}`);
   console.log("O, si el cliente admite cabeceras (evita dejar el token en los logs): URL + Authorization: Bearer <token>:");
@@ -90,8 +102,9 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "add": {
-      const nombre = args.join(" ").trim();
-      if (!nombre) fail('Uso: add "Nombre del usuario"');
+      const { rest, dias } = extractDiasFlag(args);
+      const nombre = rest.join(" ").trim();
+      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N]');
       if (store.users.some((u) => u.nombre.toLowerCase() === nombre.toLowerCase())) {
         fail(`Ya existe un usuario llamado "${nombre}".`);
       }
@@ -105,6 +118,8 @@ async function main(): Promise<void> {
         accessHash: hashAccessToken(accessToken),
         apiTokenEnc: encryptApiToken(apiToken),
         createdAt: new Date().toISOString(),
+        expiresAt: defaultExpiryIso(dias),
+        lastUsedAt: null,
       };
       store.users.push(user);
       writeStore(store);
@@ -118,16 +133,34 @@ async function main(): Promise<void> {
         console.log("No hay usuarios dados de alta.");
         break;
       }
-      for (const u of store.users) console.log(`${u.id}  ${u.nombre}  (alta ${u.createdAt.slice(0, 10)})`);
+      const now = Date.now();
+      for (const u of store.users) {
+        const alta = u.createdAt.slice(0, 10);
+        let expira = "nunca (token antiguo; usa \"rotate\" para activarle caducidad)";
+        if (u.expiresAt) {
+          const diasRestantes = Math.ceil((new Date(u.expiresAt).getTime() - now) / 86_400_000);
+          const fecha = u.expiresAt.slice(0, 10);
+          expira =
+            diasRestantes < 0
+              ? `CADUCADO (${fecha})`
+              : diasRestantes <= 14
+                ? `${fecha} (⚠ en ${diasRestantes} días)`
+                : fecha;
+        }
+        const ultimoUso = u.lastUsedAt ? u.lastUsedAt.slice(0, 10) : "nunca";
+        console.log(`${u.id}  ${u.nombre}  alta:${alta}  expira:${expira}  último uso:${ultimoUso}`);
+      }
       break;
     }
 
     case "rotate": {
-      const user = findUser(store.users, args.join(" ").trim());
+      const { rest, dias } = extractDiasFlag(args);
+      const user = findUser(store.users, rest.join(" ").trim());
       const accessToken = generateAccessToken();
       user.accessHash = hashAccessToken(accessToken);
+      user.expiresAt = defaultExpiryIso(dias);
       writeStore(store);
-      console.log("Token de acceso regenerado; el anterior deja de funcionar.");
+      console.log(`Token de acceso regenerado (válido ${dias ?? TOKEN_TTL_DAYS_DEFAULT} días); el anterior deja de funcionar.`);
       printAccess(user, accessToken);
       break;
     }
@@ -151,7 +184,9 @@ async function main(): Promise<void> {
     }
 
     default:
-      console.error('Uso: admin <add "Nombre" | list | rotate <usuario> | set-token <usuario> | revoke <usuario>>');
+      console.error(
+        'Uso: admin <add "Nombre" [--dias N] | list | rotate <usuario> [--dias N] | set-token <usuario> | revoke <usuario>>'
+      );
       process.exit(command ? 1 : 0);
   }
 }

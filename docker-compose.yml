@@ -8,9 +8,10 @@ services:
     environment:
       PORT: "3000"
     volumes:
-      - mcp_data:/data # usuarios (tokens cifrados); alta con: docker compose exec mcp node dist/admin.js add "Nombre"
+      - mcp_data:/data # usuarios (tokens cifrados) + registro de auditoría; alta con: docker compose exec mcp node dist/admin.js add "Nombre"
     ports:
       - "3917:3000" # http://localhost:3917 en el host, por si quieres probarlo sin túnel
+      - "127.0.0.1:8081:8081" # panel de administración: http://localhost:8081/admin (ver docs/panel-administracion.md)
 
   # Túnel público (Cloudflare quick tunnel) hacia el servidor MCP de arriba.
   # La URL pública sale en sus logs: `docker compose logs tunnel`.

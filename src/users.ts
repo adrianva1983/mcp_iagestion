@@ -26,6 +26,10 @@ export interface UserRecord {
   /** Token M2M de iagestión cifrado: v1.<iv>.<tag>.<datos> (base64url). */
   apiTokenEnc: string;
   createdAt: string;
+  /** ISO. El token de acceso deja de aceptarse a partir de esta fecha (ver TOKEN_TTL_DAYS_DEFAULT). */
+  expiresAt: string;
+  /** ISO del último uso con éxito, o null si nunca se ha usado. Se actualiza con retraso (ver touchLastUsed). */
+  lastUsedAt: string | null;
 }
 
 interface StoreFile {
@@ -36,6 +40,23 @@ interface StoreFile {
 export const USERS_FILE = process.env.USERS_FILE ?? path.resolve("data", "users.json");
 
 const RELOAD_CHECK_INTERVAL_MS = 2_000;
+
+// ---------------------------------------------------------------------------
+// Caducidad del token de acceso: rotación periódica obligatoria, no porque el
+// token "caduque" por sí solo, sino como higiene de seguridad. `admin add` y
+// `admin rotate` la renuevan; el servidor solo la comprueba y bloquea.
+// ---------------------------------------------------------------------------
+
+export const TOKEN_TTL_DAYS_DEFAULT = Number(process.env.TOKEN_TTL_DAYS ?? 180);
+
+export function defaultExpiryIso(days: number = TOKEN_TTL_DAYS_DEFAULT): string {
+  return new Date(Date.now() + days * 86_400_000).toISOString();
+}
+
+/** Usuarios dados de alta antes de esta funcionalidad no tienen expiresAt: nunca caducan hasta el primer rotate. */
+export function isExpired(user: UserRecord): boolean {
+  return typeof user.expiresAt === "string" && new Date(user.expiresAt).getTime() <= Date.now();
+}
 
 // ---------------------------------------------------------------------------
 // Cifrado del token de iagestión
@@ -132,9 +153,21 @@ function refreshIfChanged(): void {
 }
 
 export function countUsers(): number {
+  invalidateCache();
+  return byHash.size;
+}
+
+/**
+ * Fuerza una recarga inmediata en la próxima consulta, saltándose el
+ * throttle de RELOAD_CHECK_INTERVAL_MS. Necesario porque el panel de
+ * administración (src/adminServer.ts) escribe en el mismo proceso que sirve
+ * las peticiones MCP: sin esto, un usuario recién creado en el panel podría
+ * dar 401 durante hasta 2 segundos. Las escrituras del CLI (src/admin.ts) van
+ * en un proceso aparte y ya les vale el polling normal por mtime.
+ */
+export function invalidateCache(): void {
   lastCheck = 0;
   refreshIfChanged();
-  return byHash.size;
 }
 
 /** Devuelve el usuario dueño de ese token de acceso, o undefined si no existe. */
@@ -142,3 +175,41 @@ export function findUserByAccessToken(token: string): UserRecord | undefined {
   refreshIfChanged();
   return byHash.get(hashAccessToken(token));
 }
+
+// ---------------------------------------------------------------------------
+// Último uso: por rendimiento no se escribe en disco en cada petición HTTP
+// (podrían ser varias por segundo). Se anota en memoria y se vuelca cada
+// minuto, más al cerrar el proceso. Perder los últimos segundos de uso en un
+// apagado brusco no tiene coste real: es solo un dato informativo.
+// ---------------------------------------------------------------------------
+
+const pendingLastUsed = new Map<string, string>();
+
+export function touchLastUsed(id: string): void {
+  pendingLastUsed.set(id, new Date().toISOString());
+}
+
+function flushLastUsed(): void {
+  if (pendingLastUsed.size === 0) return;
+  const updates = new Map(pendingLastUsed);
+  pendingLastUsed.clear();
+  try {
+    const store = readStore();
+    let changed = false;
+    for (const u of store.users) {
+      const ts = updates.get(u.id);
+      if (ts) {
+        u.lastUsedAt = ts;
+        changed = true;
+      }
+    }
+    if (changed) writeStore(store);
+  } catch (error) {
+    console.error("[iagestion-mcp] No se pudo guardar el último uso de los usuarios:", error);
+  }
+}
+
+// unref(): no debe mantener vivo un proceso corto como el CLI de administración
+// (que nunca llama a touchLastUsed, así que aquí nunca tendría nada que volcar).
+setInterval(flushLastUsed, 60_000).unref();
+process.on("exit", flushLastUsed);

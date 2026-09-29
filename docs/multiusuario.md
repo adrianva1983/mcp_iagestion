@@ -14,6 +14,9 @@ Dónde se guarda (`/data/users.json`, en el volumen `mcp_data`):
 
 El servidor recarga el fichero solo (en unos 2 s): dar altas y bajas **no requiere reiniciar**.
 
+> También hay un panel web para todo esto (alta, baja, rotar, ver caducidad, actividad reciente),
+> sin salir a la terminal: [docs/panel-administracion.md](panel-administracion.md).
+
 ## Configuración inicial (una vez)
 
 En `.env`: `USERS_ENCRYPTION_KEY`, `PUBLIC_BASE_URL` e `IAGESTION_CONFIRM_TOKEN` (ver `.env.example`).
@@ -24,12 +27,21 @@ Deja `MCP_ACCESS_TOKEN` e `IAGESTION_API_TOKEN` vacíos.
 ```bash
 # Alta: pide el token de iagestión sin eco y muestra el token de acceso y la URL (solo esta vez)
 docker compose exec mcp node dist/admin.js add "Ana Pérez"
+docker compose exec mcp node dist/admin.js add "Ana Pérez" --dias 30   # caducidad distinta de la por defecto (TOKEN_TTL_DAYS)
 
 docker compose exec mcp node dist/admin.js list
-docker compose exec mcp node dist/admin.js rotate "Ana Pérez"      # token de acceso nuevo; el anterior deja de valer
+docker compose exec mcp node dist/admin.js rotate "Ana Pérez"      # token de acceso nuevo + renueva la caducidad; el anterior deja de valer
 docker compose exec mcp node dist/admin.js set-token "Ana Pérez"   # si cambia su token de iagestión
 docker compose exec mcp node dist/admin.js revoke "Ana Pérez"      # baja inmediata
 ```
+
+## Caducidad y rotación
+
+Cada token de acceso caduca a los `TOKEN_TTL_DAYS` días (180 por defecto) de crearse o rotarse — higiene de seguridad, no porque el token "sepa" caducar por sí solo. Pasada esa fecha, el servidor lo rechaza con un error `-32002` que le pide a la persona que hable contigo.
+
+`admin list` muestra, por usuario, cuándo caduca (con aviso ⚠ si quedan 14 días o menos, o `CADUCADO` si ya pasó) y su último uso. Revísalo de vez en cuando y renueva con `rotate` antes de que caduque, para no dejar a nadie sin acceso de sorpresa.
+
+Los usuarios dados de alta antes de esta funcionalidad no tienen fecha de caducidad («nunca») hasta que se les haga un `rotate`; a partir de ahí quedan sujetos a la misma caducidad que el resto.
 
 Para altas automatizadas sin dejar el token en el historial de la shell:
 `printf '%s' "$TOKEN_IAGESTION" | docker compose exec -T mcp node dist/admin.js add "Ana"`.

@@ -15,8 +15,14 @@ services:
       PORT: "3000"
       PUBLIC_BASE_URL: "https://${MCP_DOMAIN:?Define MCP_DOMAIN en .env}"
     volumes:
-      - mcp_data:/data # usuarios (tokens cifrados); alta con: docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre"
-    # Sin `ports`: el contenedor solo es accesible desde Caddy por la red interna de Docker.
+      - mcp_data:/data # usuarios (tokens cifrados) + registro de auditoría; alta con: docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre"
+    # El servidor MCP (puerto 3000) no publica ningún puerto: solo es accesible desde Caddy por la
+    # red interna de Docker. El panel de administración (puerto 8081) SÍ se publica, pero atado a
+    # 127.0.0.1: solo alcanzable desde el propio VPS (por túnel SSH). NUNCA cambies esto por
+    # "8081:8081" a secas ni lo pongas detrás de Caddy — no tiene login propio (ver
+    # docs/panel-administracion.md).
+    ports:
+      - "127.0.0.1:8081:8081"
     logging:
       driver: json-file
       options:

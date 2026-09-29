@@ -52,8 +52,10 @@ import { randomUUID, timingSafeEqual as nodeTimingSafeEqual } from "node:crypto"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createIagestionServer } from "./mcpServer.js";
+import { startAdminServer } from "./adminServer.js";
+import { logCall } from "./audit.js";
 import { runWithUser, type UserContext } from "./requestContext.js";
-import { countUsers, decryptApiToken, findUserByAccessToken, USERS_FILE } from "./users.js";
+import { countUsers, decryptApiToken, findUserByAccessToken, isExpired, touchLastUsed, USERS_FILE } from "./users.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ACCESS_TOKEN = process.env.MCP_ACCESS_TOKEN;
@@ -113,11 +115,20 @@ function authenticate(req: { params: Record<string, string | undefined>; headers
   for (const candidate of candidates) {
     const record = findUserByAccessToken(candidate);
     if (record) {
-      try {
+      if (isExpired(record)) {
         return {
-          ok: true,
-          user: { userId: record.id, nombre: record.nombre, apiToken: decryptApiToken(record.apiTokenEnc) },
+          ok: false,
+          status: 401,
+          code: -32002,
+          message:
+            `Tu token de acceso caducó el ${record.expiresAt.slice(0, 10)}. Pide a quien administra el servidor ` +
+            "que lo renueve (admin rotate) y te pase la URL nueva.",
         };
+      }
+      try {
+        const user = { userId: record.id, nombre: record.nombre, apiToken: decryptApiToken(record.apiTokenEnc) };
+        touchLastUsed(record.id);
+        return { ok: true, user };
       } catch (error) {
         // Clave de cifrado incorrecta o fichero alterado. Nunca se cae al token de otro usuario.
         console.error(`[iagestion-mcp-http] No se pudo descifrar el token de iagestión del usuario ${record.id}:`, error);
@@ -319,8 +330,11 @@ async function main(): Promise<void> {
     }
 
     // Rastro de auditoría: quién llama a qué tool (nunca se registra ningún token).
+    // Va también al fichero que lee el panel de administración (src/audit.ts), no solo al log de Docker.
     if (req.body?.method === "tools/call") {
-      console.error(`[iagestion-mcp-http] usuario=${user.nombre} (${user.userId}) tool=${req.body?.params?.name}`);
+      const toolName = typeof req.body?.params?.name === "string" ? req.body.params.name : "desconocida";
+      console.error(`[iagestion-mcp-http] usuario=${user.nombre} (${user.userId}) tool=${toolName}`);
+      logCall(user.userId, user.nombre, toolName);
     }
 
     const server = createIagestionServer();
@@ -365,6 +379,13 @@ async function main(): Promise<void> {
       `[iagestion-mcp-http] Rate limit: ${RATE_LIMIT_MAX}/min · Freno destructivo: ${DESTRUCTIVE_THRESHOLD} acciones / ${DESTRUCTIVE_WINDOW_MS / 60_000} min`
     );
   });
+
+  // Servidor y puerto aparte del de arriba: un fallo aquí no debe tumbar el servidor MCP.
+  try {
+    startAdminServer();
+  } catch (error) {
+    console.error("[iagestion-mcp-http] No se pudo iniciar el panel de administración:", error);
+  }
 }
 
 main().catch((error) => {

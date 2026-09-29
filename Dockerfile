@@ -29,11 +29,13 @@ RUN addgroup -S mcp && adduser -S mcp -G mcp
 RUN mkdir /data && chown mcp:mcp /data
 VOLUME /data
 ENV USERS_FILE=/data/users.json
+ENV AUDIT_FILE=/data/audit.jsonl
 
 USER mcp
 
 ENV PORT=3000
-EXPOSE 3000
+ENV ADMIN_PORT=8081
+EXPOSE 3000 8081
 
 # Falla el healthcheck si el servidor no responde en /health (ver src/httpServer.ts).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
