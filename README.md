@@ -101,13 +101,15 @@ expuesto a internet (túnel, PaaS...).
   `HTTP 429` con cabecera `Retry-After` y un mensaje indicando cuándo se restablece.
 - **Freno a acciones destructivas**: las llamadas a tools de `actualizar_*`, `eliminar_*`,
   `desvincular_propietario`, `publicar_despublicar_inmueble` y `gestionar_lead` se cuentan en una
-  ventana de 10 minutos. Al superar 5 en ese periodo, todas las siguientes se bloquean
-  (`HTTP 403`) hasta que la llamada incluya `"confirmacion_humana": "<IAGESTION_CONFIRM_TOKEN>"`
-  entre los argumentos de la tool — un token que solo debe conocer una persona, nunca el propio
-  LLM, para frenar una cadena de modificaciones/borrados sin que un humano la apruebe
-  explícitamente. Sin `IAGESTION_CONFIRM_TOKEN` configurado, el bloqueo no se puede levantar
-  (falla cerrado). Se implementa interceptando la petición JSON-RPC antes de que llegue a
-  cualquiera de las tools — no requiere tocar sus esquemas Zod individuales.
+  ventana de 10 minutos. Al superar 5 en ese periodo, todas las siguientes se bloquean con un
+  error JSON-RPC (código `-32010`, HTTP 200 — no 403/401: esos códigos hacen que algunos clientes
+  de conector, como claude.ai, pidan "reconectar el conector" en vez de mostrar el mensaje real)
+  hasta que la llamada incluya `"confirmacion_humana": "<IAGESTION_CONFIRM_TOKEN>"` entre los
+  argumentos de la tool — un token que solo debe conocer una persona, nunca el propio LLM, para
+  frenar una cadena de modificaciones/borrados sin que un humano la apruebe explícitamente. Sin
+  `IAGESTION_CONFIRM_TOKEN` configurado, el bloqueo no se puede levantar (falla cerrado). Se
+  implementa interceptando la petición JSON-RPC antes de que llegue a cualquiera de las tools —
+  no requiere tocar sus esquemas Zod individuales.
 
 Ambos contadores viven en memoria del proceso (no persisten entre reinicios del contenedor `mcp`)
 y son independientes por usuario.

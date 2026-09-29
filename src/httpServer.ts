@@ -325,7 +325,14 @@ async function main(): Promise<void> {
 
     const guard = guardDestructiveCall(req.body, user.userId);
     if (guard.blocked) {
-      res.status(403).json(guard.error);
+      // HTTP 200, no 403: esto es un error de negocio de UNA llamada JSON-RPC (como cualquier otro
+      // fallo de tool), no un fallo de autenticación del transporte. Probado con el conector real de
+      // claude.ai: al devolver 403 aquí, su cliente lo trataba como "hay que reconectar el conector
+      // desde su configuración" y sustituía nuestro mensaje (con las instrucciones de
+      // confirmacion_humana) por ese aviso genérico — el usuario nunca llegaba a verlo. 401 (token de
+      // acceso inválido) y 429 (límite de peticiones) sí son fallos de transporte de verdad y se quedan
+      // con su código HTTP propio.
+      res.status(200).json(guard.error);
       return;
     }
 

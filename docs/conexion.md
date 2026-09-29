@@ -162,8 +162,10 @@ Plantilla completa en [`.env.example`](../.env.example).
 - **Rate limit**: 30 peticiones/minuto por `MCP_ACCESS_TOKEN` → `HTTP 429` + `Retry-After`.
 - **Freno a acciones destructivas**: más de 5 llamadas a tools de
   `actualizar_*`/`eliminar_*`/`desvincular_propietario`/
-  `publicar_despublicar_inmueble`/`gestionar_lead` en 10 minutos → `HTTP 403`
-  hasta que la llamada incluya `"confirmacion_humana": "<IAGESTION_CONFIRM_TOKEN>"`.
+  `publicar_despublicar_inmueble`/`gestionar_lead` en 10 minutos → error JSON-RPC
+  `-32010` (HTTP 200 a propósito, para que el conector no lo confunda con un fallo
+  de autenticación) hasta que la llamada incluya
+  `"confirmacion_humana": "<IAGESTION_CONFIRM_TOKEN>"`.
 - **Censura de credenciales**: `iagestion_obtener_agencia` e
   `iagestion_listar_inmobiliarias` nunca devuelven campos que contengan
   `pass`, `secret`, `apikey`, `api_key` o `token` en su nombre — se sustituyen
