@@ -2,21 +2,22 @@
 /**
  * CLI de administración de usuarios del servidor HTTP multiusuario.
  *
- *   node dist/admin.js add "Ana Pérez" --email ana@agencia.es   alta (pide el token de iagestión sin eco)
- *   node dist/admin.js list                                     lista usuarios
- *   node dist/admin.js rotate <id|nombre>                       genera un token de acceso nuevo (invalida el anterior)
- *   node dist/admin.js set-token <id|nombre>                    cambia el token de iagestión del usuario
- *   node dist/admin.js set-email <id|nombre> <email>            cambia el email de confirmación humana
- *   node dist/admin.js revoke <id|nombre>                       baja: el usuario deja de poder conectar
+ *   node dist/admin.js add "Ana Pérez" --confirm-code 1234   alta (pide el token de iagestión sin eco)
+ *   node dist/admin.js list                                  lista usuarios
+ *   node dist/admin.js rotate <id|nombre>                    genera un token de acceso nuevo (invalida el anterior)
+ *   node dist/admin.js set-token <id|nombre>                 cambia el token de iagestión del usuario
+ *   node dist/admin.js set-confirm-code <id|nombre> <código> cambia el código de confirmación humana
+ *   node dist/admin.js revoke <id|nombre>                    baja: el usuario deja de poder conectar
  *
- * En Docker: docker compose exec mcp node dist/admin.js add "Ana Pérez" --email ana@agencia.es
+ * En Docker: docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code 1234
  * El token de iagestión también puede llegar por stdin (echo "<token>" | ... add Ana)
  * o por la variable IAGESTION_USER_TOKEN, para automatizar altas sin dejarlo en el historial.
  *
- * --email es opcional: sin él, ese usuario usa el secreto estático heredado
- * IAGESTION_CONFIRM_TOKEN en vez del código de un solo uso por email (ver
- * docs/confirmacion-humana-dinamica.md). Requiere además RESEND_API_KEY
- * configurada en el servidor para que el envío funcione de verdad.
+ * --confirm-code es opcional: es el código que ese usuario debe incluir en
+ * "confirmacion_humana" al superar el umbral de acciones destructivas
+ * (actualizar/eliminar en cadena). Sin él, usa el secreto compartido
+ * IAGESTION_CONFIRM_TOKEN del servidor. Tú eliges el valor — no lo genera ni
+ * lo envía el sistema por ningún canal; se lo dices tú a esa persona.
  */
 
 import { randomBytes } from "node:crypto";
@@ -27,6 +28,7 @@ import {
   encryptApiToken,
   generateAccessToken,
   hashAccessToken,
+  hashConfirmCode,
   readStore,
   writeStore,
   type UserRecord,
@@ -82,13 +84,13 @@ function extractDiasFlag(args: string[]): { rest: string[]; dias?: number } {
   return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], dias };
 }
 
-/** Saca "--email x@y.com" de la lista de argumentos (usado por add para el email de confirmación humana). */
-function extractEmailFlag(args: string[]): { rest: string[]; email?: string } {
-  const idx = args.findIndex((a) => a === "--email");
+/** Saca "--confirm-code X" de la lista de argumentos (usado por add para el código de confirmación humana). */
+function extractConfirmCodeFlag(args: string[]): { rest: string[]; code?: string } {
+  const idx = args.findIndex((a) => a === "--confirm-code");
   if (idx === -1) return { rest: args };
-  const email = args[idx + 1];
-  if (!email || !email.includes("@")) fail('"--email" debe ir seguido de una dirección de correo válida.');
-  return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], email };
+  const code = args[idx + 1];
+  if (!code) fail('"--confirm-code" debe ir seguido de un código.');
+  return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], code };
 }
 
 function findUser(users: UserRecord[], ref: string | undefined): UserRecord {
@@ -106,9 +108,9 @@ function printAccess(user: UserRecord, token: string): void {
   console.log(`  ${token}`);
   console.log(`Caduca: ${user.expiresAt.slice(0, 10)} (renuévalo antes con "admin rotate" si sigue en uso)`);
   console.log(
-    user.confirmEmail
-      ? `Confirmación humana: código de un solo uso a ${user.confirmEmail}`
-      : "Confirmación humana: usa el secreto estático heredado (IAGESTION_CONFIRM_TOKEN) — sin email configurado."
+    user.confirmCodeHash
+      ? "Confirmación humana: código propio configurado."
+      : "Confirmación humana: usa el código compartido del servidor (IAGESTION_CONFIRM_TOKEN)."
   );
   console.log("URL para el conector remoto (clientes que solo admiten pegar una URL):");
   console.log(`  ${base}/mcp/${token}`);
@@ -123,9 +125,9 @@ async function main(): Promise<void> {
   switch (command) {
     case "add": {
       const { rest: restDias, dias } = extractDiasFlag(args);
-      const { rest, email } = extractEmailFlag(restDias);
+      const { rest, code } = extractConfirmCodeFlag(restDias);
       const nombre = rest.join(" ").trim();
-      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N] [--email x@y.com]');
+      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N] [--confirm-code X]');
       if (store.users.some((u) => u.nombre.toLowerCase() === nombre.toLowerCase())) {
         fail(`Ya existe un usuario llamado "${nombre}".`);
       }
@@ -141,15 +143,16 @@ async function main(): Promise<void> {
         createdAt: new Date().toISOString(),
         expiresAt: defaultExpiryIso(dias),
         lastUsedAt: null,
-        confirmEmail: email,
+        confirmCodeHash: code ? hashConfirmCode(code) : undefined,
       };
       store.users.push(user);
       writeStore(store);
       console.log(`Usuario dado de alta en ${USERS_FILE}.`);
-      if (!email) {
+      if (!code) {
         console.log(
-          'Aviso: sin "--email", este usuario usará el secreto estático heredado (IAGESTION_CONFIRM_TOKEN) ' +
-            'para confirmar acciones destructivas en cadena. Añádelo luego con "admin set-email".'
+          'Aviso: sin "--confirm-code", este usuario usará el código compartido del servidor ' +
+            '(IAGESTION_CONFIRM_TOKEN) para confirmar acciones destructivas en cadena. ' +
+            'Añádele uno propio luego con "admin set-confirm-code".'
         );
       }
       printAccess(user, accessToken);
@@ -176,7 +179,7 @@ async function main(): Promise<void> {
                 : fecha;
         }
         const ultimoUso = u.lastUsedAt ? u.lastUsedAt.slice(0, 10) : "nunca";
-        const confirmacion = u.confirmEmail ? `email:${u.confirmEmail}` : "email: (usa el token estático)";
+        const confirmacion = u.confirmCodeHash ? "confirmación:propia" : "confirmación:compartida";
         console.log(`${u.id}  ${u.nombre}  alta:${alta}  expira:${expira}  último uso:${ultimoUso}  ${confirmacion}`);
       }
       break;
@@ -204,16 +207,16 @@ async function main(): Promise<void> {
       break;
     }
 
-    case "set-email": {
-      const email = args[args.length - 1];
+    case "set-confirm-code": {
+      const code = args[args.length - 1];
       const nombre = args.slice(0, -1).join(" ").trim();
-      if (!nombre || !email || !email.includes("@")) {
-        fail('Uso: set-email "Nombre del usuario" email@ejemplo.com');
+      if (!nombre || !code) {
+        fail('Uso: set-confirm-code "Nombre del usuario" <código>');
       }
       const user = findUser(store.users, nombre);
-      user.confirmEmail = email;
+      user.confirmCodeHash = hashConfirmCode(code);
       writeStore(store);
-      console.log(`Email de confirmación humana actualizado para ${user.nombre}: ${email}`);
+      console.log(`Código de confirmación humana actualizado para ${user.nombre}.`);
       break;
     }
 
@@ -227,8 +230,8 @@ async function main(): Promise<void> {
 
     default:
       console.error(
-        'Uso: admin <add "Nombre" [--dias N] [--email x@y.com] | list | rotate <usuario> [--dias N] | ' +
-          'set-token <usuario> | set-email <usuario> <email> | revoke <usuario>>'
+        'Uso: admin <add "Nombre" [--dias N] [--confirm-code X] | list | rotate <usuario> [--dias N] | ' +
+          'set-token <usuario> | set-confirm-code <usuario> <código> | revoke <usuario>>'
       );
       process.exit(command ? 1 : 0);
   }

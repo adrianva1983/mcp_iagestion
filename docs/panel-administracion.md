@@ -34,13 +34,13 @@ Al cerrar la sesión SSH se cierra también el acceso al panel.
 
 ## Qué se puede hacer
 
-- **Nuevo usuario**: nombre, su token M2M de iagestión, email de confirmación humana (opcional,
-  ver abajo) y, opcionalmente, días de validez distintos del habitual (`TOKEN_TTL_DAYS`). Al
-  crearlo se muestra el token de acceso y la URL del conector **una sola vez** — cópialos ahí
+- **Nuevo usuario**: nombre, su token M2M de iagestión, código de confirmación humana propio
+  (opcional, ver abajo) y, opcionalmente, días de validez distintos del habitual (`TOKEN_TTL_DAYS`).
+  Al crearlo se muestra el token de acceso y la URL del conector **una sola vez** — cópialos ahí
   mismo, como con `admin add`.
 - **Tabla de usuarios**: fecha de alta, caducidad (con aviso si quedan 14 días o menos, o
-  "caducado"), último uso, email de confirmación (o "token estático" si no tiene), y botones para
-  **rotar** el token de acceso, **cambiar** el token de iagestión, **cambiar** el email de
+  "caducado"), último uso, si tiene código de confirmación propio o usa el compartido, y botones
+  para **rotar** el token de acceso, **cambiar** el token de iagestión, **cambiar** el código de
   confirmación o **revocar** al usuario.
 - **Actividad reciente**: las últimas llamadas a tools, con fecha, usuario y nombre de la tool
   (nunca argumentos ni tokens). Se puede filtrar por usuario. Se guarda en `/data/audit.jsonl`,
@@ -56,7 +56,6 @@ proceso que el servidor MCP. Variables opcionales:
 | `ADMIN_PORT` | `8081` | Puerto del panel. |
 | `ADMIN_UI_ENABLED` | (activado) | Ponla en `false` para desactivar el panel por completo. |
 | `AUDIT_MAX_LINES` | `5000` | Cuántas llamadas recientes se conservan en `audit.jsonl`. |
-| `RESEND_API_KEY` | (sin definir) | Necesaria para que el email de confirmación de cada usuario funcione de verdad; sin ella, todos caen al token estático. Ver `docs/confirmacion-humana-dinamica.md`. |
 
 ## Por qué un fallo aquí no tumba el servidor MCP
 

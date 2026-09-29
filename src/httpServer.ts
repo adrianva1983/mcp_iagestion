@@ -54,14 +54,13 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createIagestionServer } from "./mcpServer.js";
 import { startAdminServer } from "./adminServer.js";
 import { logCall } from "./audit.js";
-import { consumeIfValid, issueCode, pendingFor } from "./confirmations.js";
-import { mailerConfigured, sendConfirmationEmail } from "./mailer.js";
 import { runWithUser, type UserContext } from "./requestContext.js";
 import {
   countUsers,
   decryptApiToken,
   findUserByAccessToken,
   findUserById,
+  hashConfirmCode,
   isExpired,
   touchLastUsed,
   USERS_FILE,
@@ -185,11 +184,10 @@ function checkRateLimit(userId: string): { allowed: boolean; retryAfterSeconds: 
 // ---------------------------------------------------------------------------
 // Freno a acciones destructivas: ventana fija de DESTRUCTIVE_WINDOW_MS por
 // usuario. Al superar el umbral, cada llamada destructiva adicional exige
-// confirmación humana: un código de un solo uso enviado por email al usuario
-// (ver src/confirmations.ts) si tiene confirmEmail configurado, o si no el
-// secreto estático heredado IAGESTION_CONFIRM_TOKEN. Una vez confirmado, el
-// usuario queda aprobado para el RESTO de esta ventana (approvedUntil): no
-// hace falta un código nuevo en cada llamada siguiente.
+// confirmación humana: el código propio del usuario (admin set-confirm-code)
+// si lo tiene, o si no el secreto compartido heredado IAGESTION_CONFIRM_TOKEN.
+// Una vez confirmado, el usuario queda aprobado para el RESTO de esta ventana
+// (approvedUntil): no hace falta repetir el código en cada llamada siguiente.
 // ---------------------------------------------------------------------------
 
 interface DestructiveState {
@@ -226,26 +224,11 @@ interface JsonRpcCallBody {
   params?: { name?: string; arguments?: Record<string, unknown> };
 }
 
-/**
- * Genera (si no había ya uno vigente) y envía un código de confirmación al
- * email del usuario. No reenvía mientras el anterior siga sin caducar — así
- * reintentos repetidos del LLM sin el código no disparan un email por cada
- * uno. Devuelve si hay un código vigente y enviado (aunque fuera de una
- * llamada anterior) tras esta llamada.
- */
-async function ensureCodeIssuedAndSent(
-  userId: string,
-  toolName: string,
-  email: string
-): Promise<{ sent: boolean; error?: unknown }> {
-  if (pendingFor(userId)) return { sent: true };
-  const code = issueCode(userId, toolName);
-  try {
-    await sendConfirmationEmail(email, code, toolName);
-    return { sent: true };
-  } catch (error) {
-    return { sent: false, error };
-  }
+/** Compara en tiempo constante un código en claro contra un hash SHA-256 ya guardado. */
+function matchesConfirmCode(provided: string, hash: string): boolean {
+  const a = Buffer.from(hashConfirmCode(provided), "hex");
+  const b = Buffer.from(hash, "hex");
+  return a.length === b.length && nodeTimingSafeEqual(a, b);
 }
 
 /**
@@ -258,10 +241,10 @@ async function ensureCodeIssuedAndSent(
  * inspeccionar — no hay evidencia de que ningún cliente actual los use para
  * tools/call.
  */
-async function guardDestructiveCall(
+function guardDestructiveCall(
   body: unknown,
   userId: string
-): Promise<{ blocked: false } | { blocked: true; error: ReturnType<typeof jsonRpcError> }> {
+): { blocked: false } | { blocked: true; error: ReturnType<typeof jsonRpcError> } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { blocked: false };
   const call = body as JsonRpcCallBody;
   if (call.method !== "tools/call") return { blocked: false };
@@ -281,45 +264,19 @@ async function guardDestructiveCall(
   const now = Date.now();
   if (state.approvedUntil && now < state.approvedUntil) return { blocked: false };
 
+  // Código propio del usuario (admin set-confirm-code) si lo tiene, si no el secreto compartido
+  // IAGESTION_CONFIRM_TOKEN. No es de un solo uso: es un secreto estable que el administrador
+  // define y puede cambiar, no algo que el servidor genere y envíe.
   const record = userId === "legacy" ? undefined : findUserById(userId);
-  const dynamicEnabled = mailerConfigured() && Boolean(record?.confirmEmail);
+  const ownCodeHash = record?.confirmCodeHash;
+  const configured = Boolean(ownCodeHash) || Boolean(CONFIRM_TOKEN);
 
-  if (dynamicEnabled && record?.confirmEmail) {
-    if (providedConfirmation) {
-      if (consumeIfValid(userId, providedConfirmation)) {
-        state.approvedUntil = state.windowStart + DESTRUCTIVE_WINDOW_MS;
-        return { blocked: false };
-      }
-      const { sent, error } = await ensureCodeIssuedAndSent(userId, toolName, record.confirmEmail);
-      if (error) console.error(`[iagestion-mcp-http] Error enviando email de confirmación a ${record.nombre}:`, error);
-      return {
-        blocked: true,
-        error: jsonRpcError(
-          call.id,
-          -32010,
-          sent
-            ? "Código incorrecto o caducado. Revisa tu email."
-            : "No se ha podido enviar el email de confirmación. Avisa a quien administra el servidor."
-        ),
-      };
-    }
+  const matches =
+    !!providedConfirmation &&
+    ((ownCodeHash && matchesConfirmCode(providedConfirmation, ownCodeHash)) ||
+      (!ownCodeHash && !!CONFIRM_TOKEN && timingSafeEqual(providedConfirmation, CONFIRM_TOKEN)));
 
-    const { sent, error } = await ensureCodeIssuedAndSent(userId, toolName, record.confirmEmail);
-    if (error) console.error(`[iagestion-mcp-http] Error enviando email de confirmación a ${record.nombre}:`, error);
-    return {
-      blocked: true,
-      error: jsonRpcError(
-        call.id,
-        -32010,
-        sent
-          ? 'Se requiere confirmación humana. Se ha enviado un código por email; indícalo con "confirmacion_humana" para continuar.'
-          : "No se ha podido enviar el email de confirmación. Avisa a quien administra el servidor."
-      ),
-    };
-  }
-
-  // Camino heredado: secreto estático compartido (usuarios sin confirmEmail, o sin RESEND_API_KEY configurada).
-  if (CONFIRM_TOKEN && providedConfirmation && timingSafeEqual(providedConfirmation, CONFIRM_TOKEN)) {
+  if (matches) {
     state.approvedUntil = state.windowStart + DESTRUCTIVE_WINDOW_MS;
     return { blocked: false };
   }
@@ -329,8 +286,8 @@ async function guardDestructiveCall(
     error: jsonRpcError(
       call.id,
       -32010,
-      CONFIRM_TOKEN
-        ? 'Se requiere confirmación humana. Añade "confirmacion_humana" con el código que te dé quien lo gestiona.'
+      configured
+        ? 'Se requiere confirmación humana. Añade "confirmacion_humana" con tu código de confirmación.'
         : "Se requiere confirmación humana, pero el servidor no la tiene configurada. Avisa a quien lo administra."
     ),
   };
@@ -361,16 +318,11 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!CONFIRM_TOKEN && !mailerConfigured()) {
+  if (!CONFIRM_TOKEN) {
     console.error(
-      "[iagestion-mcp-http] Aviso: ni IAGESTION_CONFIRM_TOKEN ni RESEND_API_KEY están definidas. Tras " +
-        `${DESTRUCTIVE_THRESHOLD} acciones destructivas (actualizar/eliminar/...) en ${DESTRUCTIVE_WINDOW_MS / 60_000} ` +
-        "minutos, TODAS las siguientes quedarán bloqueadas sin posibilidad de confirmación hasta que se configure una de las dos."
-    );
-  } else if (!mailerConfigured()) {
-    console.error(
-      "[iagestion-mcp-http] Aviso: RESEND_API_KEY no está definida. Aunque un usuario tenga confirmEmail " +
-        "configurado, se usará el secreto estático IAGESTION_CONFIRM_TOKEN para todos (código por email desactivado)."
+      "[iagestion-mcp-http] Aviso: IAGESTION_CONFIRM_TOKEN no está definida. Los usuarios sin código de " +
+        "confirmación propio (admin set-confirm-code) no podrán aprobar acciones destructivas tras " +
+        `${DESTRUCTIVE_THRESHOLD} de ellas en ${DESTRUCTIVE_WINDOW_MS / 60_000} minutos.`
     );
   }
 
@@ -405,7 +357,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const guard = await guardDestructiveCall(req.body, user.userId);
+    const guard = guardDestructiveCall(req.body, user.userId);
     if (guard.blocked) {
       // HTTP 200, no 403: esto es un error de negocio de UNA llamada JSON-RPC (como cualquier otro
       // fallo de tool), no un fallo de autenticación del transporte. Probado con el conector real de

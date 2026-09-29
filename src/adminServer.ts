@@ -31,6 +31,7 @@ import {
   encryptApiToken,
   generateAccessToken,
   hashAccessToken,
+  hashConfirmCode,
   invalidateCache,
   isExpired,
   readStore,
@@ -56,7 +57,8 @@ function summarize(u: UserRecord) {
     diasRestantes,
     expirado: u.expiresAt ? isExpired(u) : false,
     lastUsedAt: u.lastUsedAt,
-    confirmEmail: u.confirmEmail ?? null,
+    // Nunca se devuelve el código en sí (está hasheado, ni podríamos): solo si tiene uno propio.
+    confirmacionPropia: Boolean(u.confirmCodeHash),
   };
 }
 
@@ -68,13 +70,11 @@ function parseDias(body: unknown): number | undefined | "invalid" {
   return dias;
 }
 
-/** undefined = no venía en el body (deja el email como estaba); "invalid" = venía pero mal formado; string = válido. */
-function parseOptionalEmail(body: unknown): string | undefined | "invalid" {
-  const raw = (body as Record<string, unknown> | null)?.confirmEmail;
-  if (raw === undefined) return undefined;
-  if (raw === null || raw === "") return "";
-  if (typeof raw !== "string" || !raw.includes("@")) return "invalid";
-  return raw.trim();
+/** undefined = no venía en el body (deja el código como estaba); "" = lo pide vacío (quitarlo); string = valor nuevo. */
+function parseOptionalConfirmCode(body: unknown): string | undefined {
+  const raw = (body as Record<string, unknown> | null)?.confirmCode;
+  if (raw === undefined || raw === null) return undefined;
+  return typeof raw === "string" ? raw.trim() : undefined;
 }
 
 export function startAdminServer(): void {
@@ -99,11 +99,10 @@ export function startAdminServer(): void {
     const nombre = typeof req.body?.nombre === "string" ? req.body.nombre.trim() : "";
     const apiToken = typeof req.body?.apiToken === "string" ? req.body.apiToken.trim() : "";
     const dias = parseDias(req.body);
-    const email = parseOptionalEmail(req.body);
+    const confirmCode = parseOptionalConfirmCode(req.body);
     if (!nombre) return res.status(400).json({ error: "Falta el nombre." });
     if (!apiToken) return res.status(400).json({ error: "Falta el token M2M de iagestión." });
     if (dias === "invalid") return res.status(400).json({ error: '"dias" debe ser un número positivo.' });
-    if (email === "invalid") return res.status(400).json({ error: "El email de confirmación no es válido." });
 
     const store = readStore();
     if (store.users.some((u) => u.nombre.toLowerCase() === nombre.toLowerCase())) {
@@ -119,7 +118,7 @@ export function startAdminServer(): void {
       createdAt: new Date().toISOString(),
       expiresAt: defaultExpiryIso(dias),
       lastUsedAt: null,
-      confirmEmail: email || undefined,
+      confirmCodeHash: confirmCode ? hashConfirmCode(confirmCode) : undefined,
     };
     store.users.push(user);
     writeStore(store);
@@ -157,17 +156,17 @@ export function startAdminServer(): void {
     res.json(summarize(user));
   });
 
-  app.post("/admin/api/users/:id/set-email", (req, res) => {
-    const email = parseOptionalEmail(req.body);
-    if (email === undefined || email === "invalid") {
-      return res.status(400).json({ error: "Falta un email de confirmación válido." });
+  app.post("/admin/api/users/:id/set-confirm-code", (req, res) => {
+    const confirmCode = parseOptionalConfirmCode(req.body);
+    if (confirmCode === undefined) {
+      return res.status(400).json({ error: "Falta el campo confirmCode (vacío para quitar el código propio)." });
     }
 
     const store = readStore();
     const user = store.users.find((u) => u.id === req.params.id);
     if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
 
-    user.confirmEmail = email || undefined;
+    user.confirmCodeHash = confirmCode ? hashConfirmCode(confirmCode) : undefined;
     writeStore(store);
     invalidateCache();
     res.json(summarize(user));

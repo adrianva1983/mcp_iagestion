@@ -28,12 +28,12 @@ Deja `MCP_ACCESS_TOKEN` e `IAGESTION_API_TOKEN` vacíos.
 # Alta: pide el token de iagestión sin eco y muestra el token de acceso y la URL (solo esta vez)
 docker compose exec mcp node dist/admin.js add "Ana Pérez"
 docker compose exec mcp node dist/admin.js add "Ana Pérez" --dias 30   # caducidad distinta de la por defecto (TOKEN_TTL_DAYS)
-docker compose exec mcp node dist/admin.js add "Ana Pérez" --email ana@agencia.es   # código de confirmación por email (ver más abajo)
+docker compose exec mcp node dist/admin.js add "Ana Pérez" --confirm-code 4821   # código de confirmación propio (ver más abajo)
 
 docker compose exec mcp node dist/admin.js list
 docker compose exec mcp node dist/admin.js rotate "Ana Pérez"      # token de acceso nuevo + renueva la caducidad; el anterior deja de valer
 docker compose exec mcp node dist/admin.js set-token "Ana Pérez"   # si cambia su token de iagestión
-docker compose exec mcp node dist/admin.js set-email "Ana Pérez" ana@agencia.es   # da de alta o cambia su email de confirmación
+docker compose exec mcp node dist/admin.js set-confirm-code "Ana Pérez" 4821   # da de alta o cambia su código de confirmación
 docker compose exec mcp node dist/admin.js revoke "Ana Pérez"      # baja inmediata
 ```
 
@@ -61,13 +61,13 @@ Sin Docker: `npm run build && npm run admin -- add "Ana"` (con las mismas variab
 - Rate limit (30 peticiones/min) y freno de acciones destructivas (5 / 10 min) se aplican **por usuario**.
 - Cada llamada a una tool deja en el log `usuario=<nombre> (<id>) tool=<tool>`; nunca se registra ningún token.
 
-## Confirmación humana por email
+## Confirmación humana por código propio
 
-Al superar el freno de acciones destructivas, un usuario con `--email` configurado recibe un
-código de un solo uso por correo, en vez de depender del secreto estático `IAGESTION_CONFIRM_TOKEN`.
-Requiere `RESEND_API_KEY` en el `.env` del servidor (ver `.env.example` y
-[docs/confirmacion-humana-dinamica.md](confirmacion-humana-dinamica.md)). Sin `RESEND_API_KEY`, o
-para usuarios sin email configurado, se sigue usando el secreto estático.
+Al superar el freno de acciones destructivas, un usuario con `--confirm-code` configurado confirma
+con SU código, en vez de con el secreto compartido `IAGESTION_CONFIRM_TOKEN`. Tú eliges y cambias
+ese valor (`admin set-confirm-code`); el sistema no lo genera ni lo envía por ningún canal — se lo
+dices tú a esa persona. Detalle en
+[docs/confirmacion-humana-dinamica.md](confirmacion-humana-dinamica.md).
 
 ## Copias de seguridad
 

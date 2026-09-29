@@ -31,12 +31,13 @@ export interface UserRecord {
   /** ISO del último uso con éxito, o null si nunca se ha usado. Se actualiza con retraso (ver touchLastUsed). */
   lastUsedAt: string | null;
   /**
-   * Email al que se envía el código de confirmación humana (ver src/confirmations.ts) cuando este
-   * usuario supera el umbral de acciones destructivas. Opcional: sin él, cae al mecanismo estático
-   * heredado (IAGESTION_CONFIRM_TOKEN). Los usuarios dados de alta antes de esta funcionalidad no lo
-   * tienen — undefined, no falta de dato corrupto.
+   * SHA-256 (hex) del código de confirmación humana propio de este usuario (ver
+   * guardDestructiveCall en src/httpServer.ts). Al superar el umbral de acciones destructivas, este
+   * usuario confirma con SU código, en vez de con el secreto compartido IAGESTION_CONFIRM_TOKEN.
+   * Opcional: sin él, cae al secreto compartido. Nunca se guarda en claro, igual que accessHash —
+   * no se puede recuperar, solo cambiar (admin set-confirm-code).
    */
-  confirmEmail?: string;
+  confirmCodeHash?: string;
 }
 
 interface StoreFile {
@@ -106,6 +107,11 @@ export function generateAccessToken(): string {
 
 export function hashAccessToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+/** Igual que hashAccessToken, con nombre propio para que su uso en el freno de acciones destructivas sea claro. */
+export function hashConfirmCode(code: string): string {
+  return createHash("sha256").update(code).digest("hex");
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +191,8 @@ export function findUserByAccessToken(token: string): UserRecord | undefined {
 
 /**
  * Busca por id en vez de por token de acceso (lo usa guardDestructiveCall para saber si el usuario
- * tiene confirmEmail configurado). Recorre los usuarios en memoria — con el volumen esperado
- * (decenas, no miles) no hace falta un índice aparte.
+ * tiene su propio código de confirmación). Recorre los usuarios en memoria — con el volumen
+ * esperado (decenas, no miles) no hace falta un índice aparte.
  */
 export function findUserById(id: string): UserRecord | undefined {
   refreshIfChanged();

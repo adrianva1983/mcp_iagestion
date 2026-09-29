@@ -23,13 +23,13 @@ cd ~/mcp_iagestion
 ## 2. Da de alta al usuario
 
 ```bash
-docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre Apellido" --email nombre@agencia.es
+docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js add "Nombre Apellido" --confirm-code 4821
 ```
 
-El `--email` es opcional, pero recomendado: es la dirección a la que se le envía el código de
-confirmación cuando encadene varias acciones destructivas (actualizar/eliminar) seguidas. Sin él,
-esa persona depende del secreto estático `IAGESTION_CONFIRM_TOKEN` que gestiones tú (ver
-`docs/confirmacion-humana-dinamica.md`).
+El `--confirm-code` es opcional: es el código que esa persona debe indicar (en `confirmacion_humana`)
+cuando encadene varias acciones destructivas (actualizar/eliminar) seguidas. Tú eliges el valor y
+se lo comunicas tú mismo. Sin él, depende del código compartido `IAGESTION_CONFIRM_TOKEN` que
+gestiones tú (ver `docs/confirmacion-humana-dinamica.md`).
 
 El comando pedirá el token M2M de iagestión de esa persona. **Al pegarlo no se ve nada en
 pantalla** (es intencional, para que no quede en el historial de la terminal). Pega
@@ -94,8 +94,8 @@ docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js rotate "No
 # Cambiar su token M2M de iagestión (p. ej. si iagestión se lo ha regenerado)
 docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js set-token "Nombre Apellido"
 
-# Dar de alta o cambiar su email de confirmación humana
-docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js set-email "Nombre Apellido" nombre@agencia.es
+# Dar de alta o cambiar su código de confirmación humana propio
+docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js set-confirm-code "Nombre Apellido" 4821
 
 # Dar de baja (efecto inmediato, no reversible salvo volver a hacer "add")
 docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js revoke "Nombre Apellido"
@@ -109,8 +109,7 @@ docker compose -f docker-compose.prod.yml exec mcp node dist/admin.js revoke "No
 | El conector dice "Este conector no tiene herramientas disponibles" | El token de acceso (`imcp_…`) de la URL no es correcto, o el usuario fue revocado | Revisa la URL pegada en el conector; si hace falta, `rotate` y actualiza la URL |
 | Error `-32002`, "Tu token de acceso caducó el…" | Pasó la fecha de caducidad del token de acceso (por defecto 180 días desde el alta o el último `rotate`) | `admin rotate "Nombre"` y pásale la URL nueva |
 | `curl` a `/mcp/<token>` da 401 | Token de acceso incorrecto o el usuario no existe | `admin list` para comprobar que existe, o `add`/`rotate` |
-| Error `-32010` mencionando el token estático en vez de un email | El usuario no tiene `confirmEmail` configurado, o falta `RESEND_API_KEY` en el servidor | `admin set-email "Nombre" email@…` y comprueba `RESEND_API_KEY` en `.env` |
-| No llega el email con el código de confirmación | Puede haber caído en spam, el email esté mal escrito, o falte `RESEND_API_KEY`/`CONFIRM_EMAIL_FROM` | Revisa spam; `admin list` muestra el email guardado; revisa los logs (`docker compose … logs mcp`) por si el envío falló |
+| Error `-32010` pidiendo confirmación y el usuario no sabe qué código usar | No tiene código propio, o se le olvidó el que le diste | Recuérdaselo, o cámbialo con `admin set-confirm-code "Nombre" <código nuevo>` |
 
 Para comprobar un token M2M de iagestión directamente, sin pasar por nuestro
 servidor:

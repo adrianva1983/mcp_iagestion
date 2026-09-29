@@ -182,18 +182,18 @@ export function renderAdminPage(): string {
     <form id="createForm" class="inline">
       <label>Nombre <input id="cNombre" required></label>
       <label>Token M2M de iagestión <input id="cToken" type="password" required></label>
-      <label>Email de confirmación (opcional) <input id="cEmail" type="email" placeholder="ana@agencia.es"></label>
+      <label>Código de confirmación (opcional) <input id="cConfirmCode" type="text" placeholder="p. ej. 4821"></label>
       <label>Días de validez (opcional) <input id="cDias" type="number" min="1" placeholder="180"></label>
       <button type="submit" class="primary">Crear</button>
     </form>
-    <p class="sub" style="margin: 8px 0 0;">El email de confirmación recibe el código de un solo uso cuando este usuario encadene varias acciones destructivas. Sin él, se usa el token de confirmación estático del servidor.</p>
+    <p class="sub" style="margin: 8px 0 0;">El código de confirmación es lo que este usuario debe indicar cuando encadene varias acciones destructivas seguidas. Sin uno propio, usa el código compartido del servidor.</p>
     <div id="createMsg" class="msg"></div>
   </div>
 
   <div class="card">
     <h2>Usuarios</h2>
     <table id="usersTable">
-      <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Email confirmación</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Confirmación</th><th>Acciones</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -332,16 +332,17 @@ export function renderAdminPage(): string {
         tdUltimo.textContent = u.lastUsedAt ? fmtDate(u.lastUsedAt) : "nunca";
         tr.appendChild(tdUltimo);
 
-        var tdEmail = document.createElement("td");
-        if (u.confirmEmail) {
-          tdEmail.textContent = u.confirmEmail;
+        var tdConfirm = document.createElement("td");
+        var confirmBadge = document.createElement("span");
+        if (u.confirmacionPropia) {
+          confirmBadge.className = "badge badge-ok";
+          confirmBadge.textContent = "código propio";
         } else {
-          var emailBadge = document.createElement("span");
-          emailBadge.className = "badge badge-neutral";
-          emailBadge.textContent = "token estático";
-          tdEmail.appendChild(emailBadge);
+          confirmBadge.className = "badge badge-neutral";
+          confirmBadge.textContent = "compartida";
         }
-        tr.appendChild(tdEmail);
+        tdConfirm.appendChild(confirmBadge);
+        tr.appendChild(tdConfirm);
 
         var tdAcciones = document.createElement("td");
         tdAcciones.className = "actions";
@@ -370,16 +371,16 @@ export function renderAdminPage(): string {
         });
         tdAcciones.appendChild(bToken);
 
-        var bEmail = document.createElement("button");
-        bEmail.textContent = "Cambiar email";
-        bEmail.addEventListener("click", function () {
-          var email = window.prompt("Email de confirmación para " + u.nombre + " (vacío para quitarlo y usar el token estático):", u.confirmEmail || "");
-          if (email === null) return;
-          apiPost("/admin/api/users/" + u.id + "/set-email", { confirmEmail: email.trim() }).then(function () {
+        var bConfirmCode = document.createElement("button");
+        bConfirmCode.textContent = "Cambiar código";
+        bConfirmCode.addEventListener("click", function () {
+          var code = window.prompt("Código de confirmación para " + u.nombre + " (vacío para quitarlo y usar el compartido):", "");
+          if (code === null) return;
+          apiPost("/admin/api/users/" + u.id + "/set-confirm-code", { confirmCode: code.trim() }).then(function () {
             loadUsers();
           }).catch(function (e) { alert(e.message); });
         });
-        tdAcciones.appendChild(bEmail);
+        tdAcciones.appendChild(bConfirmCode);
 
         var bRevoke = document.createElement("button");
         bRevoke.textContent = "Revocar";
@@ -443,13 +444,13 @@ export function renderAdminPage(): string {
     ev.preventDefault();
     var nombre = el("cNombre").value.trim();
     var token = el("cToken").value.trim();
-    var email = el("cEmail").value.trim();
+    var confirmCode = el("cConfirmCode").value.trim();
     var dias = el("cDias").value ? Number(el("cDias").value) : undefined;
     var submitBtn = el("createForm").querySelector("button[type=submit]");
     el("createMsg").textContent = "";
     el("createMsg").className = "msg";
     submitBtn.disabled = true;
-    apiPost("/admin/api/users", { nombre: nombre, apiToken: token, confirmEmail: email, dias: dias }).then(function (data) {
+    apiPost("/admin/api/users", { nombre: nombre, apiToken: token, confirmCode: confirmCode, dias: dias }).then(function (data) {
       el("createForm").reset();
       showReveal("Usuario: " + data.nombre + " (nuevo)", data.accessToken, data.url);
       loadUsers();
