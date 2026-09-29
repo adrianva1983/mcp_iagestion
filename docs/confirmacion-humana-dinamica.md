@@ -1,8 +1,47 @@
 # Confirmación humana dinámica para acciones destructivas
 
-**Estado**: diseño pendiente de implementar. Sustituye al mecanismo actual
-(`IAGESTION_CONFIRM_TOKEN` estático en `.env`, ver `src/httpServer.ts`), que
-queda como solución provisional mientras esto no esté construido.
+**Estado**: implementada la versión interina (más abajo), que cubre el
+objetivo (código de un solo uso, con caducidad, por email, sin depender de un
+secreto estático) sin tocar el backend de iagestión. El diseño original de
+este documento (guardar el estado en la base de datos del CRM, vía dos
+servicios PHP nuevos) queda como posible evolución futura si algún día hace
+falta compartir el estado entre varias instancias del servidor MCP — hoy no
+hace falta, porque solo hay una.
+
+## Versión interina implementada (`src/confirmations.ts`, `src/mailer.ts`)
+
+Cada usuario puede tener un `confirmEmail` (`admin add --email` / `admin
+set-email` / el panel web). Al superar el umbral de acciones destructivas:
+
+1. El servidor genera un código de 6 dígitos, lo guarda **en memoria** del
+   propio proceso (nunca en disco ni en la base de datos del CRM) junto con
+   su hash, la tool que lo disparó y su caducidad (`CONFIRM_TTL_MINUTOS`,
+   10 minutos por defecto).
+2. Lo envía por email con Resend (`RESEND_API_KEY`, credenciales propias del
+   MCP, no las de Mailjet de la agencia).
+3. Responde a la llamada MCP con un mensaje corto pidiendo el código —
+   deliberadamente breve: el freno ya deja claro que hace falta una persona,
+   así que no hace falta explicárselo de nuevo cada vez al usuario.
+4. Cuando llega una llamada con `confirmacion_humana` que coincide (hash, no
+   en claro) y no ha caducado: se consume (un solo uso) y el usuario queda
+   aprobado para el **resto de la ventana de 10 minutos** — no hace falta un
+   código nuevo en cada llamada siguiente, solo la primera vez que se supera
+   el umbral.
+5. Un código incorrecto no genera uno nuevo automáticamente mientras el
+   anterior siga vigente (evita que reintentos del LLM disparen un email por
+   cada uno).
+6. Usuarios sin `confirmEmail`, o si falta `RESEND_API_KEY` en el servidor,
+   caen al mecanismo estático heredado (`IAGESTION_CONFIRM_TOKEN`), que sigue
+   funcionando igual que antes.
+
+Diferencias con el diseño original de más abajo: el estado vive en memoria
+del proceso (se pierde en un reinicio, sin coste real porque los códigos
+duran minutos), no hay tabla nueva en el CRM ni servicios PHP nuevos, y el
+código va siempre al propio usuario que dispara el freno (no a un
+"responsable" aparte) — es él quien recibe el email y quien se lo pasa a
+Claude.
+
+## Diseño original (base de datos del CRM) — evolución futura, no implementada
 
 ## Por qué cambiarlo
 

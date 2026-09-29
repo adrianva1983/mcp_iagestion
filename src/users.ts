@@ -30,6 +30,13 @@ export interface UserRecord {
   expiresAt: string;
   /** ISO del último uso con éxito, o null si nunca se ha usado. Se actualiza con retraso (ver touchLastUsed). */
   lastUsedAt: string | null;
+  /**
+   * Email al que se envía el código de confirmación humana (ver src/confirmations.ts) cuando este
+   * usuario supera el umbral de acciones destructivas. Opcional: sin él, cae al mecanismo estático
+   * heredado (IAGESTION_CONFIRM_TOKEN). Los usuarios dados de alta antes de esta funcionalidad no lo
+   * tienen — undefined, no falta de dato corrupto.
+   */
+  confirmEmail?: string;
 }
 
 interface StoreFile {
@@ -174,6 +181,19 @@ export function invalidateCache(): void {
 export function findUserByAccessToken(token: string): UserRecord | undefined {
   refreshIfChanged();
   return byHash.get(hashAccessToken(token));
+}
+
+/**
+ * Busca por id en vez de por token de acceso (lo usa guardDestructiveCall para saber si el usuario
+ * tiene confirmEmail configurado). Recorre los usuarios en memoria — con el volumen esperado
+ * (decenas, no miles) no hace falta un índice aparte.
+ */
+export function findUserById(id: string): UserRecord | undefined {
+  refreshIfChanged();
+  for (const record of byHash.values()) {
+    if (record.id === id) return record;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

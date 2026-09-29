@@ -182,16 +182,18 @@ export function renderAdminPage(): string {
     <form id="createForm" class="inline">
       <label>Nombre <input id="cNombre" required></label>
       <label>Token M2M de iagestión <input id="cToken" type="password" required></label>
+      <label>Email de confirmación (opcional) <input id="cEmail" type="email" placeholder="ana@agencia.es"></label>
       <label>Días de validez (opcional) <input id="cDias" type="number" min="1" placeholder="180"></label>
       <button type="submit" class="primary">Crear</button>
     </form>
+    <p class="sub" style="margin: 8px 0 0;">El email de confirmación recibe el código de un solo uso cuando este usuario encadene varias acciones destructivas. Sin él, se usa el token de confirmación estático del servidor.</p>
     <div id="createMsg" class="msg"></div>
   </div>
 
   <div class="card">
     <h2>Usuarios</h2>
     <table id="usersTable">
-      <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Alta</th><th>Expira</th><th>Último uso</th><th>Email confirmación</th><th>Acciones</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -300,7 +302,7 @@ export function renderAdminPage(): string {
       if (users.length === 0) {
         var trEmpty = document.createElement("tr");
         var tdEmpty = document.createElement("td");
-        tdEmpty.colSpan = 5;
+        tdEmpty.colSpan = 6;
         tdEmpty.className = "empty";
         tdEmpty.textContent = "No hay usuarios dados de alta todavía.";
         trEmpty.appendChild(tdEmpty);
@@ -330,6 +332,17 @@ export function renderAdminPage(): string {
         tdUltimo.textContent = u.lastUsedAt ? fmtDate(u.lastUsedAt) : "nunca";
         tr.appendChild(tdUltimo);
 
+        var tdEmail = document.createElement("td");
+        if (u.confirmEmail) {
+          tdEmail.textContent = u.confirmEmail;
+        } else {
+          var emailBadge = document.createElement("span");
+          emailBadge.className = "badge badge-neutral";
+          emailBadge.textContent = "token estático";
+          tdEmail.appendChild(emailBadge);
+        }
+        tr.appendChild(tdEmail);
+
         var tdAcciones = document.createElement("td");
         tdAcciones.className = "actions";
 
@@ -356,6 +369,17 @@ export function renderAdminPage(): string {
           }).catch(function (e) { alert(e.message); });
         });
         tdAcciones.appendChild(bToken);
+
+        var bEmail = document.createElement("button");
+        bEmail.textContent = "Cambiar email";
+        bEmail.addEventListener("click", function () {
+          var email = window.prompt("Email de confirmación para " + u.nombre + " (vacío para quitarlo y usar el token estático):", u.confirmEmail || "");
+          if (email === null) return;
+          apiPost("/admin/api/users/" + u.id + "/set-email", { confirmEmail: email.trim() }).then(function () {
+            loadUsers();
+          }).catch(function (e) { alert(e.message); });
+        });
+        tdAcciones.appendChild(bEmail);
 
         var bRevoke = document.createElement("button");
         bRevoke.textContent = "Revocar";
@@ -419,12 +443,13 @@ export function renderAdminPage(): string {
     ev.preventDefault();
     var nombre = el("cNombre").value.trim();
     var token = el("cToken").value.trim();
+    var email = el("cEmail").value.trim();
     var dias = el("cDias").value ? Number(el("cDias").value) : undefined;
     var submitBtn = el("createForm").querySelector("button[type=submit]");
     el("createMsg").textContent = "";
     el("createMsg").className = "msg";
     submitBtn.disabled = true;
-    apiPost("/admin/api/users", { nombre: nombre, apiToken: token, dias: dias }).then(function (data) {
+    apiPost("/admin/api/users", { nombre: nombre, apiToken: token, confirmEmail: email, dias: dias }).then(function (data) {
       el("createForm").reset();
       showReveal("Usuario: " + data.nombre + " (nuevo)", data.accessToken, data.url);
       loadUsers();

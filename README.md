@@ -104,12 +104,16 @@ expuesto a internet (túnel, PaaS...).
   ventana de 10 minutos. Al superar 5 en ese periodo, todas las siguientes se bloquean con un
   error JSON-RPC (código `-32010`, HTTP 200 — no 403/401: esos códigos hacen que algunos clientes
   de conector, como claude.ai, pidan "reconectar el conector" en vez de mostrar el mensaje real)
-  hasta que la llamada incluya `"confirmacion_humana": "<IAGESTION_CONFIRM_TOKEN>"` entre los
-  argumentos de la tool — un token que solo debe conocer una persona, nunca el propio LLM, para
-  frenar una cadena de modificaciones/borrados sin que un humano la apruebe explícitamente. Sin
-  `IAGESTION_CONFIRM_TOKEN` configurado, el bloqueo no se puede levantar (falla cerrado). Se
-  implementa interceptando la petición JSON-RPC antes de que llegue a cualquiera de las tools —
-  no requiere tocar sus esquemas Zod individuales.
+  hasta que se confirme, y una vez confirmado el usuario queda aprobado para el resto de esa
+  ventana. Dos mecanismos de confirmación, por usuario (ver
+  [docs/confirmacion-humana-dinamica.md](docs/confirmacion-humana-dinamica.md)):
+  - Con `confirmEmail` configurado (`admin add --email`) y `RESEND_API_KEY` en el servidor: un
+    código de 6 dígitos de un solo uso enviado por email al propio usuario.
+  - Sin ninguno de los dos: `"confirmacion_humana": "<IAGESTION_CONFIRM_TOKEN>"`, un secreto
+    estático que solo debe conocer una persona, nunca el propio LLM.
+  Sin ninguno configurado, el bloqueo no se puede levantar (falla cerrado). Se implementa
+  interceptando la petición JSON-RPC antes de que llegue a cualquiera de las tools — no requiere
+  tocar sus esquemas Zod individuales.
 
 Ambos contadores viven en memoria del proceso (no persisten entre reinicios del contenedor `mcp`)
 y son independientes por usuario.

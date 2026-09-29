@@ -54,8 +54,18 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createIagestionServer } from "./mcpServer.js";
 import { startAdminServer } from "./adminServer.js";
 import { logCall } from "./audit.js";
+import { consumeIfValid, issueCode, pendingFor } from "./confirmations.js";
+import { mailerConfigured, sendConfirmationEmail } from "./mailer.js";
 import { runWithUser, type UserContext } from "./requestContext.js";
-import { countUsers, decryptApiToken, findUserByAccessToken, isExpired, touchLastUsed, USERS_FILE } from "./users.js";
+import {
+  countUsers,
+  decryptApiToken,
+  findUserByAccessToken,
+  findUserById,
+  isExpired,
+  touchLastUsed,
+  USERS_FILE,
+} from "./users.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ACCESS_TOKEN = process.env.MCP_ACCESS_TOKEN;
@@ -174,22 +184,32 @@ function checkRateLimit(userId: string): { allowed: boolean; retryAfterSeconds: 
 
 // ---------------------------------------------------------------------------
 // Freno a acciones destructivas: ventana fija de DESTRUCTIVE_WINDOW_MS por
-// usuario. Al superar el umbral, cada llamada destructiva adicional
-// exige confirmacion_humana === IAGESTION_CONFIRM_TOKEN en sus argumentos.
+// usuario. Al superar el umbral, cada llamada destructiva adicional exige
+// confirmación humana: un código de un solo uso enviado por email al usuario
+// (ver src/confirmations.ts) si tiene confirmEmail configurado, o si no el
+// secreto estático heredado IAGESTION_CONFIRM_TOKEN. Una vez confirmado, el
+// usuario queda aprobado para el RESTO de esta ventana (approvedUntil): no
+// hace falta un código nuevo en cada llamada siguiente.
 // ---------------------------------------------------------------------------
 
-const destructiveState = new Map<string, { count: number; windowStart: number }>();
+interface DestructiveState {
+  count: number;
+  windowStart: number;
+  approvedUntil?: number;
+}
 
-function registerDestructiveCall(userId: string): { count: number } {
+const destructiveState = new Map<string, DestructiveState>();
+
+function registerDestructiveCall(userId: string): DestructiveState {
   const now = Date.now();
   const state = destructiveState.get(userId);
   if (!state || now - state.windowStart >= DESTRUCTIVE_WINDOW_MS) {
-    const fresh = { count: 1, windowStart: now };
+    const fresh: DestructiveState = { count: 1, windowStart: now };
     destructiveState.set(userId, fresh);
-    return { count: fresh.count };
+    return fresh;
   }
   state.count += 1;
-  return { count: state.count };
+  return state;
 }
 
 /** Con muchos usuarios los Map crecerían sin límite: se purgan las ventanas ya caducadas. */
@@ -207,6 +227,28 @@ interface JsonRpcCallBody {
 }
 
 /**
+ * Genera (si no había ya uno vigente) y envía un código de confirmación al
+ * email del usuario. No reenvía mientras el anterior siga sin caducar — así
+ * reintentos repetidos del LLM sin el código no disparan un email por cada
+ * uno. Devuelve si hay un código vigente y enviado (aunque fuera de una
+ * llamada anterior) tras esta llamada.
+ */
+async function ensureCodeIssuedAndSent(
+  userId: string,
+  toolName: string,
+  email: string
+): Promise<{ sent: boolean; error?: unknown }> {
+  if (pendingFor(userId)) return { sent: true };
+  const code = issueCode(userId, toolName);
+  try {
+    await sendConfirmationEmail(email, code, toolName);
+    return { sent: true };
+  } catch (error) {
+    return { sent: false, error };
+  }
+}
+
+/**
  * Inspecciona (y, si hace falta, modifica in-place) el body de una petición
  * tools/call antes de reenviarla al SDK. Devuelve un error MCP si debe
  * bloquearse; si no, deja el body listo para transport.handleRequest().
@@ -216,10 +258,10 @@ interface JsonRpcCallBody {
  * inspeccionar — no hay evidencia de que ningún cliente actual los use para
  * tools/call.
  */
-function guardDestructiveCall(
+async function guardDestructiveCall(
   body: unknown,
   userId: string
-): { blocked: false } | { blocked: true; error: ReturnType<typeof jsonRpcError> } {
+): Promise<{ blocked: false } | { blocked: true; error: ReturnType<typeof jsonRpcError> }> {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { blocked: false };
   const call = body as JsonRpcCallBody;
   if (call.method !== "tools/call") return { blocked: false };
@@ -233,28 +275,63 @@ function guardDestructiveCall(
   // campo en su esquema Zod (additionalProperties:false lo rechazaría).
   if (args && "confirmacion_humana" in args) delete args.confirmacion_humana;
 
-  const { count } = registerDestructiveCall(userId);
+  const state = registerDestructiveCall(userId);
+  if (state.count <= DESTRUCTIVE_THRESHOLD) return { blocked: false };
 
-  if (count <= DESTRUCTIVE_THRESHOLD) {
-    return { blocked: false };
+  const now = Date.now();
+  if (state.approvedUntil && now < state.approvedUntil) return { blocked: false };
+
+  const record = userId === "legacy" ? undefined : findUserById(userId);
+  const dynamicEnabled = mailerConfigured() && Boolean(record?.confirmEmail);
+
+  if (dynamicEnabled && record?.confirmEmail) {
+    if (providedConfirmation) {
+      if (consumeIfValid(userId, providedConfirmation)) {
+        state.approvedUntil = state.windowStart + DESTRUCTIVE_WINDOW_MS;
+        return { blocked: false };
+      }
+      const { sent, error } = await ensureCodeIssuedAndSent(userId, toolName, record.confirmEmail);
+      if (error) console.error(`[iagestion-mcp-http] Error enviando email de confirmación a ${record.nombre}:`, error);
+      return {
+        blocked: true,
+        error: jsonRpcError(
+          call.id,
+          -32010,
+          sent
+            ? "Código incorrecto o caducado. Revisa tu email."
+            : "No se ha podido enviar el email de confirmación. Avisa a quien administra el servidor."
+        ),
+      };
+    }
+
+    const { sent, error } = await ensureCodeIssuedAndSent(userId, toolName, record.confirmEmail);
+    if (error) console.error(`[iagestion-mcp-http] Error enviando email de confirmación a ${record.nombre}:`, error);
+    return {
+      blocked: true,
+      error: jsonRpcError(
+        call.id,
+        -32010,
+        sent
+          ? 'Se requiere confirmación humana. Se ha enviado un código por email; indícalo con "confirmacion_humana" para continuar.'
+          : "No se ha podido enviar el email de confirmación. Avisa a quien administra el servidor."
+      ),
+    };
   }
 
+  // Camino heredado: secreto estático compartido (usuarios sin confirmEmail, o sin RESEND_API_KEY configurada).
   if (CONFIRM_TOKEN && providedConfirmation && timingSafeEqual(providedConfirmation, CONFIRM_TOKEN)) {
+    state.approvedUntil = state.windowStart + DESTRUCTIVE_WINDOW_MS;
     return { blocked: false };
   }
-
-  const detalle = CONFIRM_TOKEN
-    ? `Añade "confirmacion_humana": "<el token que te dé la persona que lo gestiona>" en los argumentos de la tool.`
-    : `El servidor no tiene configurado IAGESTION_CONFIRM_TOKEN, así que ninguna acción destructiva adicional puede aprobarse hasta que se configure.`;
 
   return {
     blocked: true,
     error: jsonRpcError(
       call.id,
       -32010,
-      `Se han detectado ${count} llamadas a "${toolName}" u otras tools de actualizar/eliminar en los últimos ` +
-        `${DESTRUCTIVE_WINDOW_MS / 60_000} minutos (límite: ${DESTRUCTIVE_THRESHOLD}). Por seguridad se requiere ` +
-        `confirmación humana explícita antes de seguir modificando o borrando datos. ${detalle}`
+      CONFIRM_TOKEN
+        ? 'Se requiere confirmación humana. Añade "confirmacion_humana" con el código que te dé quien lo gestiona.'
+        : "Se requiere confirmación humana, pero el servidor no la tiene configurada. Avisa a quien lo administra."
     ),
   };
 }
@@ -284,11 +361,16 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!CONFIRM_TOKEN) {
+  if (!CONFIRM_TOKEN && !mailerConfigured()) {
     console.error(
-      "[iagestion-mcp-http] Aviso: IAGESTION_CONFIRM_TOKEN no está definida. Tras " +
+      "[iagestion-mcp-http] Aviso: ni IAGESTION_CONFIRM_TOKEN ni RESEND_API_KEY están definidas. Tras " +
         `${DESTRUCTIVE_THRESHOLD} acciones destructivas (actualizar/eliminar/...) en ${DESTRUCTIVE_WINDOW_MS / 60_000} ` +
-        "minutos, TODAS las siguientes quedarán bloqueadas sin posibilidad de confirmación hasta que se configure."
+        "minutos, TODAS las siguientes quedarán bloqueadas sin posibilidad de confirmación hasta que se configure una de las dos."
+    );
+  } else if (!mailerConfigured()) {
+    console.error(
+      "[iagestion-mcp-http] Aviso: RESEND_API_KEY no está definida. Aunque un usuario tenga confirmEmail " +
+        "configurado, se usará el secreto estático IAGESTION_CONFIRM_TOKEN para todos (código por email desactivado)."
     );
   }
 
@@ -323,7 +405,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const guard = guardDestructiveCall(req.body, user.userId);
+    const guard = await guardDestructiveCall(req.body, user.userId);
     if (guard.blocked) {
       // HTTP 200, no 403: esto es un error de negocio de UNA llamada JSON-RPC (como cualquier otro
       // fallo de tool), no un fallo de autenticación del transporte. Probado con el conector real de

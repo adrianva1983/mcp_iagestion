@@ -2,15 +2,21 @@
 /**
  * CLI de administración de usuarios del servidor HTTP multiusuario.
  *
- *   node dist/admin.js add "Ana Pérez"          alta (pide el token de iagestión sin eco)
- *   node dist/admin.js list                      lista usuarios
- *   node dist/admin.js rotate <id|nombre>        genera un token de acceso nuevo (invalida el anterior)
- *   node dist/admin.js set-token <id|nombre>     cambia el token de iagestión del usuario
- *   node dist/admin.js revoke <id|nombre>        baja: el usuario deja de poder conectar
+ *   node dist/admin.js add "Ana Pérez" --email ana@agencia.es   alta (pide el token de iagestión sin eco)
+ *   node dist/admin.js list                                     lista usuarios
+ *   node dist/admin.js rotate <id|nombre>                       genera un token de acceso nuevo (invalida el anterior)
+ *   node dist/admin.js set-token <id|nombre>                    cambia el token de iagestión del usuario
+ *   node dist/admin.js set-email <id|nombre> <email>            cambia el email de confirmación humana
+ *   node dist/admin.js revoke <id|nombre>                       baja: el usuario deja de poder conectar
  *
- * En Docker: docker compose exec mcp node dist/admin.js add "Ana Pérez"
+ * En Docker: docker compose exec mcp node dist/admin.js add "Ana Pérez" --email ana@agencia.es
  * El token de iagestión también puede llegar por stdin (echo "<token>" | ... add Ana)
  * o por la variable IAGESTION_USER_TOKEN, para automatizar altas sin dejarlo en el historial.
+ *
+ * --email es opcional: sin él, ese usuario usa el secreto estático heredado
+ * IAGESTION_CONFIRM_TOKEN en vez del código de un solo uso por email (ver
+ * docs/confirmacion-humana-dinamica.md). Requiere además RESEND_API_KEY
+ * configurada en el servidor para que el envío funcione de verdad.
  */
 
 import { randomBytes } from "node:crypto";
@@ -76,6 +82,15 @@ function extractDiasFlag(args: string[]): { rest: string[]; dias?: number } {
   return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], dias };
 }
 
+/** Saca "--email x@y.com" de la lista de argumentos (usado por add para el email de confirmación humana). */
+function extractEmailFlag(args: string[]): { rest: string[]; email?: string } {
+  const idx = args.findIndex((a) => a === "--email");
+  if (idx === -1) return { rest: args };
+  const email = args[idx + 1];
+  if (!email || !email.includes("@")) fail('"--email" debe ir seguido de una dirección de correo válida.');
+  return { rest: [...args.slice(0, idx), ...args.slice(idx + 2)], email };
+}
+
 function findUser(users: UserRecord[], ref: string | undefined): UserRecord {
   if (!ref) fail("Indica el id o el nombre del usuario.");
   const matches = users.filter((u) => u.id === ref || u.nombre.toLowerCase() === ref.toLowerCase());
@@ -90,6 +105,11 @@ function printAccess(user: UserRecord, token: string): void {
   console.log("Token de acceso (se muestra UNA sola vez, no se puede recuperar):");
   console.log(`  ${token}`);
   console.log(`Caduca: ${user.expiresAt.slice(0, 10)} (renuévalo antes con "admin rotate" si sigue en uso)`);
+  console.log(
+    user.confirmEmail
+      ? `Confirmación humana: código de un solo uso a ${user.confirmEmail}`
+      : "Confirmación humana: usa el secreto estático heredado (IAGESTION_CONFIRM_TOKEN) — sin email configurado."
+  );
   console.log("URL para el conector remoto (clientes que solo admiten pegar una URL):");
   console.log(`  ${base}/mcp/${token}`);
   console.log("O, si el cliente admite cabeceras (evita dejar el token en los logs): URL + Authorization: Bearer <token>:");
@@ -102,9 +122,10 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "add": {
-      const { rest, dias } = extractDiasFlag(args);
+      const { rest: restDias, dias } = extractDiasFlag(args);
+      const { rest, email } = extractEmailFlag(restDias);
       const nombre = rest.join(" ").trim();
-      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N]');
+      if (!nombre) fail('Uso: add "Nombre del usuario" [--dias N] [--email x@y.com]');
       if (store.users.some((u) => u.nombre.toLowerCase() === nombre.toLowerCase())) {
         fail(`Ya existe un usuario llamado "${nombre}".`);
       }
@@ -120,10 +141,17 @@ async function main(): Promise<void> {
         createdAt: new Date().toISOString(),
         expiresAt: defaultExpiryIso(dias),
         lastUsedAt: null,
+        confirmEmail: email,
       };
       store.users.push(user);
       writeStore(store);
       console.log(`Usuario dado de alta en ${USERS_FILE}.`);
+      if (!email) {
+        console.log(
+          'Aviso: sin "--email", este usuario usará el secreto estático heredado (IAGESTION_CONFIRM_TOKEN) ' +
+            'para confirmar acciones destructivas en cadena. Añádelo luego con "admin set-email".'
+        );
+      }
       printAccess(user, accessToken);
       break;
     }
@@ -148,7 +176,8 @@ async function main(): Promise<void> {
                 : fecha;
         }
         const ultimoUso = u.lastUsedAt ? u.lastUsedAt.slice(0, 10) : "nunca";
-        console.log(`${u.id}  ${u.nombre}  alta:${alta}  expira:${expira}  último uso:${ultimoUso}`);
+        const confirmacion = u.confirmEmail ? `email:${u.confirmEmail}` : "email: (usa el token estático)";
+        console.log(`${u.id}  ${u.nombre}  alta:${alta}  expira:${expira}  último uso:${ultimoUso}  ${confirmacion}`);
       }
       break;
     }
@@ -175,6 +204,19 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "set-email": {
+      const email = args[args.length - 1];
+      const nombre = args.slice(0, -1).join(" ").trim();
+      if (!nombre || !email || !email.includes("@")) {
+        fail('Uso: set-email "Nombre del usuario" email@ejemplo.com');
+      }
+      const user = findUser(store.users, nombre);
+      user.confirmEmail = email;
+      writeStore(store);
+      console.log(`Email de confirmación humana actualizado para ${user.nombre}: ${email}`);
+      break;
+    }
+
     case "revoke": {
       const user = findUser(store.users, args.join(" ").trim());
       store.users = store.users.filter((u) => u.id !== user.id);
@@ -185,7 +227,8 @@ async function main(): Promise<void> {
 
     default:
       console.error(
-        'Uso: admin <add "Nombre" [--dias N] | list | rotate <usuario> [--dias N] | set-token <usuario> | revoke <usuario>>'
+        'Uso: admin <add "Nombre" [--dias N] [--email x@y.com] | list | rotate <usuario> [--dias N] | ' +
+          'set-token <usuario> | set-email <usuario> <email> | revoke <usuario>>'
       );
       process.exit(command ? 1 : 0);
   }

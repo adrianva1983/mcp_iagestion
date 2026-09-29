@@ -56,6 +56,7 @@ function summarize(u: UserRecord) {
     diasRestantes,
     expirado: u.expiresAt ? isExpired(u) : false,
     lastUsedAt: u.lastUsedAt,
+    confirmEmail: u.confirmEmail ?? null,
   };
 }
 
@@ -65,6 +66,15 @@ function parseDias(body: unknown): number | undefined | "invalid" {
   const dias = Number(raw);
   if (!Number.isFinite(dias) || dias <= 0) return "invalid";
   return dias;
+}
+
+/** undefined = no venía en el body (deja el email como estaba); "invalid" = venía pero mal formado; string = válido. */
+function parseOptionalEmail(body: unknown): string | undefined | "invalid" {
+  const raw = (body as Record<string, unknown> | null)?.confirmEmail;
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return "";
+  if (typeof raw !== "string" || !raw.includes("@")) return "invalid";
+  return raw.trim();
 }
 
 export function startAdminServer(): void {
@@ -89,9 +99,11 @@ export function startAdminServer(): void {
     const nombre = typeof req.body?.nombre === "string" ? req.body.nombre.trim() : "";
     const apiToken = typeof req.body?.apiToken === "string" ? req.body.apiToken.trim() : "";
     const dias = parseDias(req.body);
+    const email = parseOptionalEmail(req.body);
     if (!nombre) return res.status(400).json({ error: "Falta el nombre." });
     if (!apiToken) return res.status(400).json({ error: "Falta el token M2M de iagestión." });
     if (dias === "invalid") return res.status(400).json({ error: '"dias" debe ser un número positivo.' });
+    if (email === "invalid") return res.status(400).json({ error: "El email de confirmación no es válido." });
 
     const store = readStore();
     if (store.users.some((u) => u.nombre.toLowerCase() === nombre.toLowerCase())) {
@@ -107,6 +119,7 @@ export function startAdminServer(): void {
       createdAt: new Date().toISOString(),
       expiresAt: defaultExpiryIso(dias),
       lastUsedAt: null,
+      confirmEmail: email || undefined,
     };
     store.users.push(user);
     writeStore(store);
@@ -139,6 +152,22 @@ export function startAdminServer(): void {
     if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
 
     user.apiTokenEnc = encryptApiToken(apiToken);
+    writeStore(store);
+    invalidateCache();
+    res.json(summarize(user));
+  });
+
+  app.post("/admin/api/users/:id/set-email", (req, res) => {
+    const email = parseOptionalEmail(req.body);
+    if (email === undefined || email === "invalid") {
+      return res.status(400).json({ error: "Falta un email de confirmación válido." });
+    }
+
+    const store = readStore();
+    const user = store.users.find((u) => u.id === req.params.id);
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+
+    user.confirmEmail = email || undefined;
     writeStore(store);
     invalidateCache();
     res.json(summarize(user));
