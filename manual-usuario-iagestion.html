@@ -1,0 +1,422 @@
+<title>Manual del conector iagestión</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --surface: #ffffff;
+    --surface-2: #f0ede6;
+    --ink: #1c1e1b;
+    --ink-muted: #5b6058;
+    --border: #e4e1da;
+    --accent: #2b6e5b;
+    --accent-ink: #ffffff;
+    --accent-soft: #e3efea;
+    --warn: #b4650a;
+    --warn-soft: #fbeedf;
+    --code-bg: #14171a;
+    --code-ink: #e7e4dc;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171a;
+      --surface: #1c2023;
+      --surface-2: #22272a;
+      --ink: #edeeec;
+      --ink-muted: #9ba39d;
+      --border: #2c3134;
+      --accent: #55b598;
+      --accent-ink: #0b1210;
+      --accent-soft: #1e2e29;
+      --warn: #e2a356;
+      --warn-soft: #2e2416;
+      --code-bg: #0b0d0e;
+      --code-ink: #e7e4dc;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171a;
+    --surface: #1c2023;
+    --surface-2: #22272a;
+    --ink: #edeeec;
+    --ink-muted: #9ba39d;
+    --border: #2c3134;
+    --accent: #55b598;
+    --accent-ink: #0b1210;
+    --accent-soft: #1e2e29;
+    --warn: #e2a356;
+    --warn-soft: #2e2416;
+    --code-bg: #0b0d0e;
+    --code-ink: #e7e4dc;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+  }
+  .gutter { padding-inline: 20px; }
+  .wrap { max-width: 760px; margin-inline: auto; }
+
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; text-wrap: balance; margin: 0; }
+  h2 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0 0 12px; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  /* Barra superior */
+  .topbar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--border);
+    padding-block: 12px;
+  }
+  .topbar-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.95rem; }
+  .brand .mark {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center; font-family: "Fraunces", serif; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;
+  }
+  nav.pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav.pills a {
+    font-size: 0.78rem; color: var(--ink-muted); text-decoration: none; padding: 6px 11px;
+    border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
+  }
+  nav.pills a:hover { background: var(--surface-2); color: var(--ink); }
+  #themeToggle {
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+    border-radius: 7px; padding: 6px 11px; font-size: 0.78rem; cursor: pointer; font-family: inherit;
+  }
+  #themeToggle:hover { background: var(--surface-2); }
+
+  /* Hero */
+  .hero { padding-block: 44px 32px; }
+  .kicker { color: var(--accent); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .hero h1 { font-size: clamp(1.7rem, 4.5vw, 2.35rem); font-weight: 600; }
+  .hero p.lead { color: var(--ink-muted); font-size: 1.05rem; margin-top: 12px; max-width: 60ch; }
+
+  section { padding-block: 30px; scroll-margin-top: 74px; }
+  section + section { border-top: 1px solid var(--border); }
+  section h2 { margin-bottom: 6px; }
+  .section-intro { color: var(--ink-muted); margin-bottom: 20px; max-width: 60ch; }
+
+  /* Pasos de conexión */
+  ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  ol.steps li { display: flex; gap: 14px; align-items: flex-start; }
+  ol.steps .num {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; font-family: "Fraunces", serif;
+  }
+  ol.steps .step-body strong { display: block; margin-bottom: 2px; }
+  .callout {
+    display: flex; gap: 10px; background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: 10px; padding: 12px 14px; margin-top: 18px; color: var(--ink); font-size: 0.92rem;
+  }
+  .callout .dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-top: 7px; }
+
+  /* Buscador + tarjetas de peticiones */
+  .search-wrap { position: relative; margin-bottom: 18px; }
+  #searchBox {
+    width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 9px;
+    background: var(--surface); color: var(--ink); font-size: 0.92rem; font-family: inherit;
+  }
+  #searchBox:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cards { display: flex; flex-direction: column; gap: 10px; }
+  details.card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  details.card summary {
+    list-style: none; cursor: pointer; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  details.card summary::-webkit-details-marker { display: none; }
+  details.card summary .cat-title { font-weight: 600; font-size: 0.97rem; }
+  details.card summary .cat-hint { color: var(--ink-muted); font-size: 0.82rem; display: block; margin-top: 2px; font-weight: 400; }
+  details.card summary .chevron {
+    flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; transition: transform 0.15s ease; color: var(--ink-muted);
+  }
+  details.card[open] summary .chevron { transform: rotate(45deg); }
+  details.card .card-body { padding: 0 16px 16px; border-top: 1px solid var(--border); }
+  details.card .card-body p { margin: 12px 0; color: var(--ink); font-size: 0.92rem; }
+  .prompt-bubble {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 9px; padding: 11px 13px;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; font-size: 0.84rem;
+  }
+  .prompt-bubble .txt { font-family: "IBM Plex Mono", monospace; line-height: 1.5; }
+  .copy-btn {
+    flex-shrink: 0; background: transparent; border: 1px solid color-mix(in srgb, var(--code-ink) 30%, transparent);
+    color: var(--code-ink); border-radius: 6px; padding: 5px 9px; font-size: 0.75rem; cursor: pointer; font-family: inherit;
+  }
+  .copy-btn:hover { background: color-mix(in srgb, var(--code-ink) 12%, transparent); }
+  #noResults { display: none; color: var(--ink-muted); font-size: 0.9rem; padding: 18px 0; text-align: center; }
+
+  /* Pista de pasos de confirmación */
+  .track { display: flex; gap: 0; margin-top: 22px; flex-wrap: wrap; }
+  .track .tstep { flex: 1 1 160px; position: relative; padding-right: 18px; }
+  .track .tstep::after {
+    content: ""; position: absolute; top: 13px; right: 0; width: 18px; height: 1px; background: var(--border);
+  }
+  .track .tstep:last-child::after { display: none; }
+  .track .tnum {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem; font-family: "Fraunces", serif; margin-bottom: 8px;
+  }
+  .track .ttext { font-size: 0.86rem; color: var(--ink-muted); }
+  @media (max-width: 620px) {
+    .track { flex-direction: column; gap: 16px; }
+    .track .tstep::after { display: none; }
+  }
+
+  ul.plain { margin: 0; padding-left: 20px; }
+  ul.plain li { margin-bottom: 10px; }
+  ul.plain li::marker { color: var(--accent); }
+
+  footer { padding-block: 26px 50px; color: var(--ink-muted); font-size: 0.86rem; }
+  footer a { color: var(--accent); }
+</style>
+
+<div class="topbar gutter">
+  <div class="wrap topbar-inner">
+    <div class="brand"><span class="mark">ig</span> Manual del conector</div>
+    <nav class="pills">
+      <a href="#conectar">Conectar</a>
+      <a href="#peticiones">Peticiones</a>
+      <a href="#confirmacion">Confirmación</a>
+      <a href="#practicas">Buenas prácticas</a>
+      <a href="#ayuda">Ayuda</a>
+    </nav>
+    <button id="themeToggle" type="button">Modo oscuro</button>
+  </div>
+</div>
+
+<main class="gutter">
+  <div class="wrap">
+    <section class="hero" id="top">
+      <div class="kicker">Guía para el equipo</div>
+      <h1>Habla con iagestión directamente desde Claude</h1>
+      <p class="lead">Este conector deja consultar y actualizar el CRM sin salir de la conversación: busca inmuebles, gestiona contactos, registra visitas y mucho más, pidiéndoselo a Claude en lenguaje normal.</p>
+    </section>
+
+    <section id="conectar">
+      <h2>Cómo conectar tu cuenta</h2>
+      <p class="section-intro">Tres pasos, una sola vez.</p>
+      <ol class="steps">
+        <li>
+          <span class="num">1</span>
+          <span class="step-body"><strong>Entra en claude.ai</strong> y ve a Ajustes → Conectores → Añadir conector personalizado.</span>
+        </li>
+        <li>
+          <span class="num">2</span>
+          <span class="step-body"><strong>Pega tu URL personal</strong>, la que te haya dado quien administra el sistema. Es distinta para cada persona.</span>
+        </li>
+        <li>
+          <span class="num">3</span>
+          <span class="step-body"><strong>Guarda.</strong> El conector aparece en tus conversaciones, listo para usar.</span>
+        </li>
+      </ol>
+      <div class="callout">
+        <span class="dot"></span>
+        <span>Esa URL funciona como una contraseña: da acceso de lectura y escritura al CRM con tus permisos. No la compartas ni la pegues en ningún sitio público.</span>
+      </div>
+    </section>
+
+    <section id="peticiones">
+      <h2>Qué le puedes pedir a Claude</h2>
+      <p class="section-intro">No hace falta ningún comando especial: pídeselo tal cual se lo dirías a un compañero. Toca una categoría para ver un ejemplo listo para copiar.</p>
+
+      <div class="search-wrap">
+        <input id="searchBox" type="text" placeholder="Buscar por palabra: inmuebles, portales, agente…">
+      </div>
+
+      <div class="cards" id="cardList">
+        <!-- las tarjetas las inserta el script, a partir de CATEGORIES -->
+      </div>
+      <p id="noResults">Ninguna categoría coincide con esa búsqueda.</p>
+    </section>
+
+    <section id="confirmacion">
+      <h2>Cuándo te pedirá confirmación</h2>
+      <p class="section-intro">Dar de alta datos nuevos no pide nada especial. Pero si en pocos minutos le pides <strong>modificar o borrar</strong> varios registros seguidos, Claude se detiene a partir del 6.º cambio.</p>
+
+      <div class="track">
+        <div class="tstep"><div class="tnum">1</div><div class="ttext">Encadenas varios cambios o borrados seguidos</div></div>
+        <div class="tstep"><div class="tnum">2</div><div class="ttext">En el 6.º, Claude se detiene y te pide tu código</div></div>
+        <div class="tstep"><div class="tnum">3</div><div class="ttext">Se lo das, y sigue sin volver a pedirlo</div></div>
+        <div class="tstep"><div class="tnum">4</div><div class="ttext">Pasados unos minutos, si encadenas más, lo pedirá de nuevo</div></div>
+      </div>
+
+      <div class="callout" style="margin-top: 24px;">
+        <span class="dot"></span>
+        <span>No es un error: es un aviso de seguridad para que una cadena de cambios no se ejecute sola sin que una persona la revise. Si no recuerdas tu código, o no tienes uno propio, pídeselo a quien administra el sistema.</span>
+      </div>
+    </section>
+
+    <section id="practicas">
+      <h2>Buenas prácticas</h2>
+      <ul class="plain">
+        <li><strong>Revisa antes de confirmar</strong> un cambio importante: pregunta «muéstrame los datos antes de guardarlos» si tienes dudas.</li>
+        <li><strong>No compartas</strong> tu URL de conector ni tu código de confirmación con nadie, ni los pegues en chats o documentos que otros puedan ver.</li>
+        <li><strong>Pide primero que consulte</strong> si no estás seguro de un dato: «busca el inmueble X» antes de «actualiza el inmueble X».</li>
+        <li>Cada acción queda registrada (quién, qué y cuándo), así que ante cualquier duda se puede consultar el historial.</li>
+      </ul>
+    </section>
+
+    <section id="ayuda">
+      <h2>Si algo no funciona</h2>
+      <div class="cards" id="faqList"></div>
+    </section>
+  </div>
+</main>
+
+<footer class="gutter">
+  <div class="wrap">Para dar de alta a alguien más del equipo, o para cualquier otra duda, contacta con quien administra el sistema en tu agencia.</div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  function el(id) { return document.getElementById(id); }
+
+  // --- Tema ---
+  function isDarkNow() {
+    var attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark") return true;
+    if (attr === "light") return false;
+    return Boolean(window.matchMedia) && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function updateThemeButton() {
+    el("themeToggle").textContent = isDarkNow() ? "Modo claro" : "Modo oscuro";
+  }
+  function setTheme(theme) {
+    if (theme) document.documentElement.setAttribute("data-theme", theme);
+    else document.documentElement.removeAttribute("data-theme");
+    try {
+      if (theme) localStorage.setItem("iagestion-manual-theme", theme);
+      else localStorage.removeItem("iagestion-manual-theme");
+    } catch (e) { /* sin almacenamiento persistente: el tema dura solo esta carga */ }
+    updateThemeButton();
+  }
+  try {
+    var saved = localStorage.getItem("iagestion-manual-theme");
+    if (saved === "dark" || saved === "light") document.documentElement.setAttribute("data-theme", saved);
+  } catch (e) {}
+  el("themeToggle").addEventListener("click", function () { setTheme(isDarkNow() ? "light" : "dark"); });
+  updateThemeButton();
+
+  // --- Copiar al portapapeles, con fallback de selección ---
+  function copyText(text, btn) {
+    function done() {
+      var original = btn.textContent;
+      btn.textContent = "¡Copiado!";
+      setTimeout(function () { btn.textContent = original; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { fallbackSelect(text, btn, done); });
+    } else {
+      fallbackSelect(text, btn, done);
+    }
+  }
+  function fallbackSelect(text, btn, done) {
+    var span = btn.previousElementSibling;
+    if (span) {
+      var range = document.createRange();
+      range.selectNodeContents(span);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    done();
+  }
+
+  // --- Contenido: categorías de peticiones ---
+  var CATEGORIES = [
+    { title: "Inmuebles", hint: "buscar, ficha, alta, actualizar, valoración", body: "Buscar por zona, precio o tipo; ver la ficha completa; dar de alta uno nuevo; actualizar sus datos; calcular una valoración automática.", example: "Busca pisos en venta en Malasaña por debajo de 300.000 €" },
+    { title: "Contactos", hint: "buscar, alta, actualizar", body: "Buscar, dar de alta y actualizar teléfono, email o dirección.", example: "Crea un contacto: Juan Pérez, 600 123 456" },
+    { title: "Demandas", hint: "búsquedas de un cliente", body: "Buscar, dar de alta, actualizar, y ver qué inmuebles encajan con la búsqueda de un cliente.", example: "¿Qué inmuebles encajan con la demanda de Ana?" },
+    { title: "Gestiones", hint: "citas y actividad comercial", body: "Registrar una llamada o visita, consultar el historial, ver los huecos libres de un agente.", example: "Apunta que he llamado hoy al cliente García" },
+    { title: "Agentes", hint: "listado, alta, actualizar", body: "Consultar el listado de agentes, darlo de alta o actualizar sus datos.", example: "¿Qué agentes hay en la oficina de Sevilla?" },
+    { title: "Propietarios", hint: "vincular a un inmueble", body: "Ver quién es el propietario de un inmueble, vincularlo o desvincularlo.", example: "¿Quién es el propietario del inmueble REF123?" },
+    { title: "Prospectos", hint: "buscar, actualizar", body: "Buscar y actualizar prospectos de compra o alquiler.", example: "Busca prospectos interesados en alquiler en Triana" },
+    { title: "Leads de portales", hint: "Idealista, Fotocasa…", body: "Consultar los leads recibidos, convertirlos en contacto o descartarlos.", example: "¿Hay leads nuevos de Idealista esta semana?" },
+    { title: "Publicación en portales", hint: "publicar, despublicar", body: "Ver dónde está publicado un inmueble, publicarlo o quitarlo de un portal.", example: "Despublica el REF123 de Fotocasa" },
+    { title: "Catálogos", hint: "provincias, municipios, tipos", body: "Provincias, municipios, tipos de inmueble y otros datos de referencia.", example: "¿Qué municipios hay en la provincia de Cádiz?" },
+    { title: "Agencia", hint: "datos y licencias", body: "Datos de tu agencia y licencias contratadas.", example: "¿Cuántas licencias tenemos disponibles?" }
+  ];
+
+  var FAQS = [
+    { title: "El conector aparece pero «sin herramientas disponibles»", body: "La URL no es válida o ha caducado. Avisa a quien administra el sistema para que te dé una nueva." },
+    { title: "Claude dice que tu acceso ha caducado", body: "El acceso tiene una fecha de validez, como cualquier credencial. Pide que te lo renueven." },
+    { title: "Te pide un código de confirmación y no lo tienes", body: "Pídeselo a quien administra el sistema — ver la sección de confirmación más arriba." },
+    { title: "Un dato no se actualiza o da error", body: "Puede ser un dato inexistente en el CRM, o una desconexión puntual. Vuelve a intentarlo; si persiste, avisa a soporte." }
+  ];
+
+  function buildCard(item, withPrompt) {
+    var d = document.createElement("details");
+    d.className = "card";
+    if (withPrompt) d.setAttribute("data-search", (item.title + " " + item.hint + " " + item.body + " " + item.example).toLowerCase());
+
+    var s = document.createElement("summary");
+    var left = document.createElement("span");
+    var t = document.createElement("span");
+    t.className = "cat-title";
+    t.textContent = item.title;
+    left.appendChild(t);
+    var h = document.createElement("span");
+    h.className = "cat-hint";
+    h.textContent = item.hint || "";
+    left.appendChild(h);
+    s.appendChild(left);
+    var chev = document.createElement("span");
+    chev.className = "chevron";
+    chev.textContent = "+";
+    s.appendChild(chev);
+    d.appendChild(s);
+
+    var body = document.createElement("div");
+    body.className = "card-body";
+    var p = document.createElement("p");
+    p.textContent = item.body;
+    body.appendChild(p);
+
+    if (withPrompt) {
+      var bubble = document.createElement("div");
+      bubble.className = "prompt-bubble";
+      var txt = document.createElement("span");
+      txt.className = "txt";
+      txt.textContent = item.example;
+      bubble.appendChild(txt);
+      var btn = document.createElement("button");
+      btn.className = "copy-btn";
+      btn.type = "button";
+      btn.textContent = "Copiar";
+      btn.addEventListener("click", function () { copyText(item.example, btn); });
+      bubble.appendChild(btn);
+      body.appendChild(bubble);
+    }
+
+    d.appendChild(body);
+    return d;
+  }
+
+  var cardList = el("cardList");
+  CATEGORIES.forEach(function (c) { cardList.appendChild(buildCard(c, true)); });
+
+  var faqList = el("faqList");
+  FAQS.forEach(function (f) { faqList.appendChild(buildCard(f, false)); });
+
+  el("searchBox").addEventListener("input", function () {
+    var q = this.value.trim().toLowerCase();
+    var anyVisible = false;
+    Array.prototype.forEach.call(cardList.children, function (card) {
+      var match = !q || (card.getAttribute("data-search") || "").indexOf(q) !== -1;
+      card.hidden = !match;
+      if (match) anyVisible = true;
+    });
+    el("noResults").style.display = anyVisible ? "none" : "block";
+  });
+})();
+</script>
