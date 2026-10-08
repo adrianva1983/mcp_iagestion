@@ -15,6 +15,7 @@ import { registerAgentesTools } from "./tools/agentes.js";
 import { registerPropietariosTools } from "./tools/propietarios.js";
 import { registerPublicacionTools } from "./tools/publicacion.js";
 import { registerProspectosTools } from "./tools/prospectos.js";
+import { registerOperacionesTools } from "./tools/operaciones.js";
 import { registerLeadsTools } from "./tools/leads.js";
 import { registerOtrosTools } from "./tools/otros.js";
 import { registerLicenciasTools } from "./tools/licencias.js";
@@ -35,6 +36,7 @@ export function createIagestionServer(): McpServer {
   registerPropietariosTools(server);
   registerPublicacionTools(server);
   registerProspectosTools(server);
+  registerOperacionesTools(server);
   registerLeadsTools(server);
   registerOtrosTools(server);
   registerLicenciasTools(server);

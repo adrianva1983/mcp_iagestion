@@ -16,7 +16,7 @@ MCP (Claude Desktop, Claude Code, claude.ai web, Gemini CLI...) al servidor
 | Autenticación extra | Ninguna (el proceso ya corre bajo tu usuario) | `MCP_ACCESS_TOKEN` en la URL + rate limit + freno de acciones destructivas |
 | Alcance | Solo tu máquina | Accesible desde internet mientras el túnel esté activo |
 
-Las 45 tools son exactamente las mismas en ambos transportes — la única
+Las 47 tools son exactamente las mismas en ambos transportes — la única
 diferencia es cómo llega la petición al servidor.
 
 ---
